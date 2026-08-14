@@ -82,20 +82,25 @@ export class MGBABridge {
      * @param {string} filename 
      */
     async loadROM(romBuffer, filename = 'game.gba') {
-        if (!this.module || typeof this.module._mgba_load_rom !== 'function') {
+        if (!this.module || typeof this.module._mgba_load_game !== 'function') {
             await this.init();
         }
 
         const u8 = romBuffer instanceof Uint8Array ? romBuffer : new Uint8Array(romBuffer);
         
-        if (this.module && typeof this.module._mgba_load_rom === 'function') {
-            const ptr = this.module._malloc(u8.length);
-            this.module.HEAPU8.set(u8, ptr);
-            const success = this.module._mgba_load_rom(ptr, u8.length);
-            this.module._free(ptr);
-            if (success) {
-                this.isRomLoaded = true;
-                return true;
+        if (this.module && this.module.FS && typeof this.module._mgba_load_game === 'function') {
+            try {
+                this.module.FS.writeFile('/game.gba', u8);
+                const pathPtr = this.module.allocateUTF8('/game.gba');
+                const success = this.module._mgba_load_game(pathPtr);
+                this.module._free(pathPtr);
+                if (success) {
+                    this.isRomLoaded = true;
+                    console.log('[MGBABridge] ROM loaded successfully via mGBA VFS');
+                    return true;
+                }
+            } catch (e) {
+                console.error('[MGBABridge] Error in loadROM via FS:', e);
             }
         }
 
