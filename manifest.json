@@ -6,27 +6,27 @@
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#2c2345",
-  "theme_color": "#493b70",
+  "background_color": "#51407e",
+  "theme_color": "#51407e",
   "categories": ["games", "entertainment"],
   "icons": [
     {
       "src": "./icon_neko.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
       "src": "./assets/icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
       "src": "./assets/icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ]
 }
