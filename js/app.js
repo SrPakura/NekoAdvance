@@ -51,8 +51,8 @@ class NekoAdvanceApp {
 
     // Global User Interaction Listener to Unlock AudioContext
     const unlockAudio = () => {
-      if (this.engine && this.engine.gba && this.engine.gba.audio) {
-        this.engine.gba.audio.ensureContext();
+      if (this.engine && this.engine.audioDriver) {
+        this.engine.audioDriver.ensureContext();
       }
       ['pointerdown', 'keydown', 'touchstart', 'click'].forEach(evt => {
         window.removeEventListener(evt, unlockAudio);

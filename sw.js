@@ -1,6 +1,6 @@
 // NekoAdvance Rolling-Release Service Worker
 // Automatically checks for updates, auto-activates in the background, and serves freshest content.
-const CACHE_NAME = 'nekoadvance-rolling-v23';
+const CACHE_NAME = 'nekoadvance-rolling-v25';
 
 const ASSETS_TO_CACHE = [
   './',
@@ -11,6 +11,11 @@ const ASSETS_TO_CACHE = [
   './css/modal.css',
   './css/hud.css',
   './js/app.js',
+  './js/core/renderer/webgl-renderer.js',
+  './js/core/audio/audio-driver.js',
+  './js/core/mgba/mgba-bridge.js',
+  './js/core/mgba/mgba.js',
+  './js/core/mgba/mgba.wasm',
   './js/core/gbajs/util.js',
   './js/core/gbajs/arm.js',
   './js/core/gbajs/thumb.js',
@@ -27,7 +32,6 @@ const ASSETS_TO_CACHE = [
   './js/core/gbajs/sio.js',
   './js/core/gbajs/gba.js',
   './js/core/storage.js',
-  './js/core/audio-driver.js',
   './js/core/cheat-engine.js',
   './js/core/gba-engine.js',
   './js/input/input-manager.js',

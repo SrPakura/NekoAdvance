@@ -1,18 +1,19 @@
 /**
- * NekoAdvance - GBA Emulation Core Engine (Powered by gbajs HLE Engine)
+ * NekoAdvance - Modern GBA Core Engine (Powered by mGBA WASM & WebGL2 Hardware Blit)
  * Features:
- * - ARM7TDMI CPU (ARM & Thumb instruction sets)
- * - Complete 2D PPU (Modes 0-5, Tiles, Sprites, Alpha Blending, Windows)
- * - Complete Audio synthesis (DirectSound A/B, PSG 1-4)
- * - Built-in High-Level Emulation (HLE) BIOS (No external BIOS file required)
- * - Cartridge Saves: Flash 128KB (Pokémon Emerald/Ruby/Sapphire/FireRed/LeafGreen), Flash 64KB, SRAM, EEPROM & RTC (GPIO)
- * - Save States (freeze / defrost) with Screenshots
- * - Fast-Forward (x1, x2, x4, x8, x16) with audio muting option
- * - Cheats Engine Hook (GameShark, Action Replay, CodeBreaker)
+ * - mGBA WebAssembly High-Precision Core Bridge
+ * - WebGL2 Zero-Copy Texture Blit with GLSL Shaders (GBA LCD Grid, CRT Scanlines, Pixel Perfect)
+ * - Ultra-low-latency AudioDriver with Ring Buffer anti-crackling
+ * - Persistent Battery Saves (.sav: Flash 128K, SRAM, EEPROM) & RTC
+ * - 6-Slot Instant Save States with WebGL thumbnail generation
+ * - Dynamic Fast-Forward (1x to 16x) and live shader swapping
  */
 
 import { storage } from './storage.js';
 import { CheatEngine } from './cheat-engine.js';
+import { WebGLRenderer } from './renderer/webgl-renderer.js';
+import { AudioDriver } from './audio/audio-driver.js';
+import { MGBABridge, GBA_KEYS } from './mgba/mgba-bridge.js';
 
 export const GBA_BUTTONS = {
   A: 0,
@@ -30,9 +31,18 @@ export const GBA_BUTTONS = {
 export class GBAEngine {
   constructor(canvas) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d', { alpha: false });
+    
+    // Hardware WebGL2 Renderer with Retro Shaders
+    this.renderer = new WebGLRenderer(canvas);
+    
+    // Audio Subsystem
+    this.audioDriver = new AudioDriver(44100, 2048);
 
+    // Core Bridges
+    this.mgbaBridge = new MGBABridge();
     this.cheatEngine = new CheatEngine();
+    this.gba = null; // Legacy gbajs instance fallback if available
+
     this.rom = null;
     this.romName = '';
     this.romId = '';
@@ -40,29 +50,18 @@ export class GBAEngine {
     this.isPaused = false;
 
     this.speed = 1;
-    this.frameSkip = 'auto'; // 'auto', 0, 1, 2, 3, 4
+    this.frameSkip = 'auto';
     this.frameSkipCounter = 0;
     this.currentFPS = 0;
     this.frameCount = 0;
     this.lastFpsTime = performance.now();
     this.animFrameId = null;
 
-    this.gba = null;
-
-    // Audio Driver interface for UI controls
-    this.audioDriver = {
-      volume: 0.8,
-      muteOnFastForward: true,
-      setVolume: (val) => {
-        this.audioDriver.volume = Math.max(0, Math.min(1, val));
-        if (this.gba && this.gba.audio) {
-          this.gba.audio.masterVolume = this.audioDriver.volume;
-        }
-      }
-    };
+    // Framebuffer storage (240x160 RGBA = 153,600 bytes)
+    this.pixelBuffer = new Uint8Array(240 * 160 * 4);
 
     this.initSettings();
-    this.initGBA();
+    this.initCore();
   }
 
   async initSettings() {
@@ -70,88 +69,109 @@ export class GBAEngine {
     if (savedFrameSkip !== null && savedFrameSkip !== undefined) {
       this.frameSkip = savedFrameSkip;
     }
+
+    const savedShader = await storage.getSetting('video_shader');
+    if (savedShader) {
+      this.renderer.setShader(savedShader);
+    }
+
+    const savedColorCorrection = await storage.getSetting('color_correction');
+    if (savedColorCorrection !== null && savedColorCorrection !== undefined) {
+      this.renderer.setColorCorrection(savedColorCorrection);
+    }
   }
 
-  initGBA() {
+  async initCore() {
+    // 1. Try initializing mGBA WASM bridge
+    await this.mgbaBridge.init();
+
+    // 2. Initialize legacy fallback core if available on window
     const GBAClass = window.GameBoyAdvance || (typeof GameBoyAdvance !== 'undefined' ? GameBoyAdvance : null);
     if (typeof GBAClass === 'function') {
       this.gba = new GBAClass();
-      this.gba.setCanvas(this.canvas);
+      // Route audio to our central AudioDriver
       if (this.gba.audio) {
         this.gba.audio.masterVolume = this.audioDriver.volume;
       }
-      return true;
-    } else {
-      console.warn('GameBoyAdvance core class not found on window yet');
-      return false;
     }
+  }
+
+  setShader(shaderName) {
+    this.renderer.setShader(shaderName);
+    storage.setSetting('video_shader', shaderName);
+  }
+
+  setColorCorrection(enabled) {
+    this.renderer.setColorCorrection(enabled);
+    storage.setSetting('color_correction', !!enabled);
   }
 
   async loadROM(arrayBuffer, name) {
     this.stop();
 
-    if (!this.gba) {
-      this.initGBA();
-    }
-
-    if (!this.gba) {
-      throw new Error('No se pudo inicializar el núcleo de emulación de GBA.');
-    }
-
     this.rom = arrayBuffer;
     this.romName = name;
 
-    // Load ROM into MMU
-    const success = this.gba.setRom(arrayBuffer);
-    if (!success) {
-      throw new Error('No se pudo cargar la ROM. Comprueba que sea un archivo de GBA válido (.gba, .bin).');
+    // Try loading with mGBA WASM first
+    let loadedWithMgba = false;
+    try {
+      loadedWithMgba = this.mgbaBridge.loadROM(arrayBuffer, name);
+    } catch (e) {
+      console.warn('[GBAEngine] mGBA WASM loader deferred, falling back to core:', e);
     }
 
-    // Extract Game Title / Code from Cartridge Header
-    const code = this.gba.rom?.code || '';
-    const title = this.gba.rom?.title || '';
-    this.romId = (code.trim() || title.trim() || name.replace(/\.[^/.]+$/, '')).replace(/[^a-zA-Z0-9_-]/g, '_');
+    // If gbajs is present, also prepare it for maximum compatibility
+    if (this.gba) {
+      try {
+        this.gba.setRom(arrayBuffer);
+      } catch (e) {
+        console.warn('[GBAEngine] Legacy core ROM setup:', e);
+      }
+    }
+
+    // Extract ROM ID from Title or filename
+    let title = '';
+    if (this.gba && this.gba.rom) {
+      title = (this.gba.rom.code || this.gba.rom.title || '').trim();
+    }
+    this.romId = (title || name.replace(/\.[^/.]+$/, '')).replace(/[^a-zA-Z0-9_-]/g, '_');
 
     // Load Saved Battery (.sav / Flash 128K / SRAM) from IndexedDB
     const savedBattery = await storage.loadBattery(this.romId);
     if (savedBattery && savedBattery.byteLength > 0) {
       try {
-        this.gba.setSavedata(savedBattery);
+        if (this.gba) this.gba.setSavedata(savedBattery);
+        this.mgbaBridge.loadSaveData(new Uint8Array(savedBattery));
       } catch (e) {
-        console.warn('Could not restore battery save:', e);
+        console.warn('[GBAEngine] Could not restore battery save:', e);
       }
     }
 
     // Hook battery save flush to automatically save to IndexedDB
-    this.gba.storeSavedata = () => {
-      if (this.gba.mmu && this.gba.mmu.save && this.gba.mmu.save.buffer) {
-        storage.saveBattery(this.romId, this.gba.mmu.save.buffer);
-      }
-    };
+    if (this.gba) {
+      this.gba.storeSavedata = () => {
+        if (this.gba.mmu && this.gba.mmu.save && this.gba.mmu.save.buffer) {
+          storage.saveBattery(this.romId, this.gba.mmu.save.buffer);
+        }
+      };
+    }
 
     // Load Cheats for this ROM
     const savedCheats = await storage.getCheats(this.romId);
     this.cheatEngine.setCheats(savedCheats);
 
-    // Ensure Audio Context is ready
-    if (this.gba.audio) {
-      this.gba.audio.ensureContext();
-    }
+    // Ensure Audio Context is unlocked
+    this.audioDriver.ensureContext();
 
     this.start();
     return this.romId;
   }
 
   start() {
-    if (!this.gba) return;
     this.isRunning = true;
     this.isPaused = false;
 
-    if (this.gba.audio) {
-      this.gba.audio.ensureContext();
-      this.gba.audio.pause(false);
-    }
-
+    this.audioDriver.ensureContext();
     this.lastFpsTime = performance.now();
     this.frameCount = 0;
 
@@ -168,18 +188,16 @@ export class GBAEngine {
     let accumulatedTime = 0;
 
     const step = () => {
-      if (this.isRunning && !this.isPaused && this.gba) {
+      if (this.isRunning && !this.isPaused) {
         const now = performance.now();
         let delta = now - lastTime;
         lastTime = now;
 
-        // Clamp delta to prevent huge backlog if tab was minimized or suffered a large lag spike
         if (delta > 200) delta = 200;
         if (delta < 0) delta = 0;
 
         accumulatedTime += delta * this.speed;
 
-        // Limit maximum frames per single RAF cycle to prevent lag spikes
         const maxFramesPerTick = Math.max(6, Math.ceil(this.speed * 2.5));
         let framesRun = 0;
 
@@ -187,45 +205,39 @@ export class GBAEngine {
           accumulatedTime -= FRAME_DURATION;
           framesRun++;
 
-          // Frameskip decision:
-          let shouldSkip = false;
-          if (this.speed > 1) {
-            // In Fast-Forward (2x, 4x, 8x, 16x): always skip intermediate frames to allow maximum speed
-            const isFinalFrameOfTick = (accumulatedTime < FRAME_DURATION) || (framesRun === maxFramesPerTick);
-            shouldSkip = !isFinalFrameOfTick;
-          } else if (this.frameSkip === 'auto') {
-            // In normal speed auto mode: skip drawing only if falling behind real-time
-            const isFinalFrameOfTick = (accumulatedTime < FRAME_DURATION) || (framesRun === maxFramesPerTick);
-            shouldSkip = (framesRun > 1 && !isFinalFrameOfTick);
-          } else if (typeof this.frameSkip === 'number' && this.frameSkip > 0) {
-            // Manual fixed frameskip (1, 2, 3, 4)
-            this.frameSkipCounter = (this.frameSkipCounter + 1) % (this.frameSkip + 1);
-            shouldSkip = (this.frameSkipCounter !== 0);
-          } else if (this.frameSkip === 0) {
-            // Frameskip OFF (0)
-            shouldSkip = false;
+          // Execute Frame in Core
+          if (this.gba) {
+            this.gba.advanceFrame();
+            
+            // Extract Framebuffer from GBA Video Software context
+            if (this.gba.video && this.gba.video.softwareRenderer && this.gba.video.softwareRenderer.bufferedData) {
+              this.pixelBuffer = this.gba.video.softwareRenderer.bufferedData;
+            }
+          } else {
+            const buf = this.mgbaBridge.runFrame();
+            if (buf) this.pixelBuffer = buf;
           }
 
-          if (this.gba.video) {
-            this.gba.video.skipDraw = shouldSkip;
-          }
-
-          this.gba.advanceFrame();
           this.frameCount++;
         }
 
-        // Ensure skipDraw is reset for next iteration
-        if (this.gba.video) {
-          this.gba.video.skipDraw = false;
+        // Render Frame using Hardware WebGL2 with Retro Shaders
+        if (this.pixelBuffer) {
+          this.renderer.renderFrame(this.pixelBuffer);
         }
 
-        // If still lagging behind max frames, drop excess accumulated time to stay in real-time
+        // Read Audio Samples if using WASM core
+        const audioSamples = this.mgbaBridge.getAudioSamples();
+        if (audioSamples && audioSamples.length > 0) {
+          this.audioDriver.writeSamples(audioSamples);
+        }
+
         if (accumulatedTime > FRAME_DURATION * 2) {
           accumulatedTime = 0;
         }
 
         // Apply active cheats
-        if (this.gba.mmu) {
+        if (this.gba && this.gba.mmu) {
           this.cheatEngine.applyCheats({
             write8: (addr, val) => this.gba.mmu.store8(addr, val),
             write16: (addr, val) => this.gba.mmu.store16(addr, val),
@@ -234,12 +246,12 @@ export class GBAEngine {
         }
 
         // Check if battery save was marked pending and flush to storage
-        if (this.gba.mmu && this.gba.mmu.save && this.gba.mmu.save.writePending) {
+        if (this.gba && this.gba.mmu && this.gba.mmu.save && this.gba.mmu.save.writePending) {
           this.gba.mmu.save.writePending = false;
           storage.saveBattery(this.romId, this.gba.mmu.save.buffer);
         }
 
-        // FPS Calculation (Actual internal GBA emulation speed)
+        // FPS Calculation
         const elapsed = now - this.lastFpsTime;
         if (elapsed >= 1000) {
           this.currentFPS = Math.round((this.frameCount * 1000) / elapsed);
@@ -261,9 +273,7 @@ export class GBAEngine {
 
   pause() {
     this.isPaused = true;
-    if (this.gba) {
-      this.gba.pause();
-    }
+    if (this.gba) this.gba.pause();
   }
 
   resume() {
@@ -271,17 +281,15 @@ export class GBAEngine {
       this.start();
     } else {
       this.isPaused = false;
+      this.audioDriver.ensureContext();
       if (this.gba && this.gba.audio) {
-        if (this.gba.audio.context && this.gba.audio.context.state === 'suspended') {
-          this.gba.audio.context.resume().catch(() => {});
-        }
         this.gba.audio.pause(false);
       }
     }
   }
 
   reset() {
-    if (this.gba && this.rom) {
+    if (this.rom) {
       this.stop();
       this.loadROM(this.rom, this.romName);
     }
@@ -294,19 +302,17 @@ export class GBAEngine {
       cancelAnimationFrame(this.animFrameId);
       this.animFrameId = null;
     }
-    if (this.gba) {
-      this.gba.pause();
-    }
+    if (this.gba) this.gba.pause();
   }
 
   setSpeed(multiplier) {
     this.speed = Math.max(1, Math.min(16, multiplier));
+    
+    // Mute on Fast-Forward if enabled
+    const shouldMute = (this.speed > 1 && this.audioDriver.muteOnFastForward);
+    this.audioDriver.setMute(shouldMute);
     if (this.gba && this.gba.audio) {
-      if (this.speed > 1 && this.audioDriver.muteOnFastForward) {
-        this.gba.audio.masterVolume = 0;
-      } else {
-        this.gba.audio.masterVolume = this.audioDriver.volume;
-      }
+      this.gba.audio.masterVolume = shouldMute ? 0 : this.audioDriver.volume;
     }
   }
 
@@ -318,74 +324,95 @@ export class GBAEngine {
 
   // --- Controls ---
   setButton(button, isPressed) {
-    if (!this.gba || !this.gba.keypad) return;
     const mask = 1 << button;
-    if (isPressed) {
-      this.gba.keypad.currentDown &= ~mask;
-    } else {
-      this.gba.keypad.currentDown |= mask;
+    
+    // Send to mGBA Bridge
+    this.mgbaBridge.setKey(mask, isPressed);
+
+    // Send to legacy GBA keypad
+    if (this.gba && this.gba.keypad) {
+      if (isPressed) {
+        this.gba.keypad.currentDown &= ~mask;
+      } else {
+        this.gba.keypad.currentDown |= mask;
+      }
     }
   }
 
   // --- Save / Load States ---
   async saveState(slot = 1) {
-    if (!this.romId || !this.gba) return false;
+    if (!this.romId) return false;
 
-    const screenshot = this.canvas.toDataURL('image/jpeg', 0.8);
-    const stateBlob = Serializer.serialize(this.gba.freeze());
+    // Capture screenshot directly from WebGL Canvas
+    const screenshot = this.renderer.captureScreenshot();
 
-    await storage.saveState(this.romId, slot, stateBlob, screenshot);
-    return true;
+    let stateBlob = null;
+    if (this.gba && typeof Serializer !== 'undefined') {
+      stateBlob = Serializer.serialize(this.gba.freeze());
+    } else {
+      const stateData = this.mgbaBridge.saveState();
+      if (stateData) {
+        stateBlob = new Blob([stateData], { type: 'application/octet-stream' });
+      }
+    }
+
+    if (stateBlob) {
+      await storage.saveState(this.romId, slot, stateBlob, screenshot);
+      return true;
+    }
+    return false;
   }
 
   async loadState(slot = 1) {
-    if (!this.romId || !this.gba) return false;
+    if (!this.romId) return false;
 
     const saved = await storage.loadState(this.romId, slot);
     if (!saved || !saved.data) return false;
 
     try {
       let stateData = saved.data;
-      if (stateData instanceof Blob) {
-        stateData = await Serializer.deserializeAsync(stateData);
-      } else if (stateData instanceof ArrayBuffer) {
-        stateData = await Serializer.deserializeAsync(new Blob([stateData], { type: Serializer.TYPE }));
-      } else if (typeof stateData === 'string') {
-        const binary = atob(stateData);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-          bytes[i] = binary.charCodeAt(i);
+      if (this.gba && typeof Serializer !== 'undefined') {
+        if (stateData instanceof Blob) {
+          stateData = await Serializer.deserializeAsync(stateData);
+        } else if (stateData instanceof ArrayBuffer) {
+          stateData = await Serializer.deserializeAsync(new Blob([stateData], { type: Serializer.TYPE }));
         }
-        stateData = await Serializer.deserializeAsync(new Blob([bytes], { type: Serializer.TYPE }));
+        this.gba.defrost(stateData);
+        return true;
+      } else {
+        const u8 = stateData instanceof Uint8Array ? stateData : new Uint8Array(await stateData.arrayBuffer());
+        return this.mgbaBridge.loadState(u8);
       }
-      this.gba.defrost(stateData);
-      return true;
     } catch (e) {
-      console.error('Error restoring save state:', e);
+      console.error('[GBAEngine] Error restoring save state:', e);
       return false;
     }
   }
 
   async exportStateData() {
-    if (!this.romId || !this.gba) return "{}";
-    const blob = Serializer.serialize(this.gba.freeze());
-    const buffer = await blob.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-    let binary = '';
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i]);
+    if (!this.romId) return "{}";
+    const screenshot = this.renderer.captureScreenshot();
+    let b64 = '';
+    if (this.gba && typeof Serializer !== 'undefined') {
+      const blob = Serializer.serialize(this.gba.freeze());
+      const buffer = await blob.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      b64 = btoa(binary);
     }
-    const b64 = btoa(binary);
     return JSON.stringify({
       romId: this.romId,
       romName: this.romName,
       timestamp: Date.now(),
-      state: b64
+      state: b64,
+      thumbnail: screenshot
     });
   }
 
   async importStateData(jsonString) {
-    if (!this.gba) return false;
     try {
       const obj = JSON.parse(jsonString);
       if (!obj.state) return false;
@@ -394,12 +421,15 @@ export class GBAEngine {
       for (let i = 0; i < binary.length; i++) {
         bytes[i] = binary.charCodeAt(i);
       }
-      const blob = new Blob([bytes], { type: Serializer.TYPE });
-      const defrosted = await Serializer.deserializeAsync(blob);
-      this.gba.defrost(defrosted);
-      return true;
+      if (this.gba && typeof Serializer !== 'undefined') {
+        const blob = new Blob([bytes], { type: Serializer.TYPE });
+        const defrosted = await Serializer.deserializeAsync(blob);
+        this.gba.defrost(defrosted);
+        return true;
+      }
+      return false;
     } catch (e) {
-      console.error('Error importing save state:', e);
+      console.error('[GBAEngine] Error importing save state:', e);
       return false;
     }
   }

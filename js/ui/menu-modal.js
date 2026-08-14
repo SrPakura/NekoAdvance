@@ -118,7 +118,10 @@ export class MenuModal {
 
     // Cache settings
     this.volume = 0.8;
-    this.scanlines = true;
+    this.shaderKeys = ['gba-lcd', 'pixel-perfect', 'crt-scanlines', 'smooth'];
+    this.shaderLabels = ['LCD GBA (MATRIZ)', 'PIXEL PERFECT', 'CRT SCANLINES', 'SUAVE (BILINEAR)'];
+    this.currentShaderIdx = 0;
+    this.colorCorrection = true;
     this.haptic = true;
     this.speeds = [1, 2, 4, 8, 16];
     this.currentSpeedIdx = 0;
@@ -534,18 +537,20 @@ export class MenuModal {
     const currentSpeed = this.engine.speed;
     const currentFrameSkip = this.frameSkipLabels[this.currentFrameSkipIdx] || 'AUTO';
     const volPercent = Math.round(this.volume * 100);
-    const scanText = this.scanlines ? 'ON' : 'OFF';
-    const scanBadge = this.scanlines ? 'badge-on' : 'badge-off';
+    const shaderText = this.shaderLabels[this.currentShaderIdx] || 'LCD GBA';
+    const colorText = this.colorCorrection ? 'ON' : 'OFF';
+    const colorBadge = this.colorCorrection ? 'badge-on' : 'badge-off';
     const hapticText = this.inputManager.hapticEnabled ? 'ON' : 'OFF';
     const hapticBadge = this.inputManager.hapticEnabled ? 'badge-on' : 'badge-off';
     const muteFF = this.engine.audioDriver.muteOnFastForward ? 'ON' : 'OFF';
     const muteFFBadge = this.engine.audioDriver.muteOnFastForward ? 'badge-on' : 'badge-off';
 
     const items = [
+      { id: 'shader', title: 'SHADER / FILTRO VÍDEO (WEBGL)', val: `◄ ${shaderText} ►`, badge: 'GPU' },
+      { id: 'color', title: 'CORRECCIÓN COLOR GBA', val: `◄ ${colorText} ►`, badgeClass: colorBadge },
       { id: 'speed', title: 'VELOCIDAD FAST-FORWARD', val: `◄ ${currentSpeed}x ►`, badge: 'SPEED' },
       { id: 'frameskip', title: 'SALTO DE FRAMES (FRAMESKIP)', val: `◄ ${currentFrameSkip} ►`, badge: 'FPS' },
       { id: 'muteFF', title: 'SILENCIAR EN AVANCE RÁPIDO', val: `◄ ${muteFF} ►`, badgeClass: muteFFBadge },
-      { id: 'scanlines', title: 'FILTRO SCANLINES CRT', val: `◄ ${scanText} ►`, badgeClass: scanBadge },
       { id: 'volume', title: 'VOLUMEN PRINCIPAL', val: `◄ ${volPercent}% ►`, badge: 'AUDIO' },
       { id: 'haptic', title: 'VIBRACIÓN HÁPTICA', val: `◄ ${hapticText} ►`, badgeClass: hapticBadge },
       { id: 'controls', title: 'GUÍA / ATAJOS DE TECLADO', val: '[INFO]', badge: 'KEYS' },
@@ -641,10 +646,11 @@ export class MenuModal {
       }
     } else if (activeTab === 'settings') {
       const setting = activeRow.dataset.setting;
-      if (setting === 'speed') this.adjustSelection(1);
+      if (setting === 'shader') this.adjustSelection(1);
+      else if (setting === 'color') this.adjustSelection(1);
+      else if (setting === 'speed') this.adjustSelection(1);
       else if (setting === 'frameskip') this.adjustSelection(1);
       else if (setting === 'muteFF') this.adjustSelection(1);
-      else if (setting === 'scanlines') this.adjustSelection(1);
       else if (setting === 'volume') this.adjustSelection(1);
       else if (setting === 'haptic') this.adjustSelection(1);
       else if (setting === 'controls') this.showControlsInfo();
@@ -672,7 +678,19 @@ export class MenuModal {
     const setting = activeRow.dataset.setting;
     this.synth.playCursor();
 
-    if (setting === 'speed') {
+    if (setting === 'shader') {
+      const nextIdx = (this.currentShaderIdx + dir + this.shaderKeys.length) % this.shaderKeys.length;
+      this.currentShaderIdx = nextIdx;
+      const shaderKey = this.shaderKeys[nextIdx];
+      this.engine.setShader(shaderKey);
+      this.hud.showToast(`Shader: ${this.shaderLabels[nextIdx]}`, '🎨');
+      this.renderSettings();
+    } else if (setting === 'color') {
+      this.colorCorrection = !this.colorCorrection;
+      this.engine.setColorCorrection(this.colorCorrection);
+      this.hud.showToast(`Corrección de Color: ${this.colorCorrection ? 'ON' : 'OFF'}`, '🌈');
+      this.renderSettings();
+    } else if (setting === 'speed') {
       const currentSpeed = this.engine.speed;
       const idx = this.speeds.indexOf(currentSpeed);
       const nextIdx = (idx + dir + this.speeds.length) % this.speeds.length;
@@ -690,14 +708,6 @@ export class MenuModal {
     } else if (setting === 'muteFF') {
       const newMute = !this.engine.audioDriver.muteOnFastForward;
       this.engine.audioDriver.muteOnFastForward = newMute;
-      this.renderSettings();
-    } else if (setting === 'scanlines') {
-      this.scanlines = !this.scanlines;
-      const viewport = document.getElementById('screen-viewport');
-      if (viewport) {
-        viewport.classList.toggle('no-scanlines', !this.scanlines);
-      }
-      storage.setSetting('scanlines', this.scanlines);
       this.renderSettings();
     } else if (setting === 'volume') {
       this.volume = Math.max(0, Math.min(1, Math.round((this.volume + dir * 0.1) * 10) / 10));
