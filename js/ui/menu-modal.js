@@ -123,6 +123,10 @@ export class MenuModal {
     this.speeds = [1, 2, 4, 8, 16];
     this.currentSpeedIdx = 0;
 
+    this.frameSkipLabels = ['AUTO', 'OFF (0)', '1', '2', '3', '4'];
+    this.frameSkipValues = ['auto', 0, 1, 2, 3, 4];
+    this.currentFrameSkipIdx = 0;
+
     this.init();
   }
 
@@ -154,6 +158,11 @@ export class MenuModal {
     if (savedVol !== null) this.volume = savedVol;
     const savedScan = await storage.getSetting('scanlines');
     if (savedScan !== null) this.scanlines = savedScan;
+    const savedFrameSkip = await storage.getSetting('frameskip');
+    if (savedFrameSkip !== null && savedFrameSkip !== undefined) {
+      const idx = this.frameSkipValues.indexOf(savedFrameSkip);
+      if (idx >= 0) this.currentFrameSkipIdx = idx;
+    }
   }
 
   open(tabName = 'library') {
@@ -523,6 +532,7 @@ export class MenuModal {
     if (!list) return;
 
     const currentSpeed = this.engine.speed;
+    const currentFrameSkip = this.frameSkipLabels[this.currentFrameSkipIdx] || 'AUTO';
     const volPercent = Math.round(this.volume * 100);
     const scanText = this.scanlines ? 'ON' : 'OFF';
     const scanBadge = this.scanlines ? 'badge-on' : 'badge-off';
@@ -533,6 +543,7 @@ export class MenuModal {
 
     const items = [
       { id: 'speed', title: 'VELOCIDAD FAST-FORWARD', val: `◄ ${currentSpeed}x ►`, badge: 'SPEED' },
+      { id: 'frameskip', title: 'SALTO DE FRAMES (FRAMESKIP)', val: `◄ ${currentFrameSkip} ►`, badge: 'FPS' },
       { id: 'muteFF', title: 'SILENCIAR EN AVANCE RÁPIDO', val: `◄ ${muteFF} ►`, badgeClass: muteFFBadge },
       { id: 'scanlines', title: 'FILTRO SCANLINES CRT', val: `◄ ${scanText} ►`, badgeClass: scanBadge },
       { id: 'volume', title: 'VOLUMEN PRINCIPAL', val: `◄ ${volPercent}% ►`, badge: 'AUDIO' },
@@ -631,6 +642,7 @@ export class MenuModal {
     } else if (activeTab === 'settings') {
       const setting = activeRow.dataset.setting;
       if (setting === 'speed') this.adjustSelection(1);
+      else if (setting === 'frameskip') this.adjustSelection(1);
       else if (setting === 'muteFF') this.adjustSelection(1);
       else if (setting === 'scanlines') this.adjustSelection(1);
       else if (setting === 'volume') this.adjustSelection(1);
@@ -667,6 +679,13 @@ export class MenuModal {
       const newSpeed = this.speeds[nextIdx];
       this.engine.setSpeed(newSpeed);
       this.hud.updateSpeedBadge(newSpeed);
+      this.renderSettings();
+    } else if (setting === 'frameskip') {
+      const nextIdx = (this.currentFrameSkipIdx + dir + this.frameSkipValues.length) % this.frameSkipValues.length;
+      this.currentFrameSkipIdx = nextIdx;
+      const newSkipVal = this.frameSkipValues[nextIdx];
+      this.engine.setFrameSkip(newSkipVal);
+      this.hud.showToast(`Frameskip: ${this.frameSkipLabels[nextIdx]}`, '⚡');
       this.renderSettings();
     } else if (setting === 'muteFF') {
       const newMute = !this.engine.audioDriver.muteOnFastForward;

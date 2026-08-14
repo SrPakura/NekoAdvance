@@ -40,6 +40,8 @@ export class GBAEngine {
     this.isPaused = false;
 
     this.speed = 1;
+    this.frameSkip = 'auto'; // 'auto', 0, 1, 2, 3, 4
+    this.frameSkipCounter = 0;
     this.currentFPS = 0;
     this.frameCount = 0;
     this.lastFpsTime = performance.now();
@@ -59,7 +61,15 @@ export class GBAEngine {
       }
     };
 
+    this.initSettings();
     this.initGBA();
+  }
+
+  async initSettings() {
+    const savedFrameSkip = await storage.getSetting('frameskip');
+    if (savedFrameSkip !== null && savedFrameSkip !== undefined) {
+      this.frameSkip = savedFrameSkip;
+    }
   }
 
   initGBA() {
@@ -177,10 +187,27 @@ export class GBAEngine {
           accumulatedTime -= FRAME_DURATION;
           framesRun++;
 
-          // Auto-Frameskip: skip heavy canvas drawing on intermediate frames
-          const isFinalFrameOfTick = (accumulatedTime < FRAME_DURATION) || (framesRun === maxFramesPerTick);
+          // Frameskip decision:
+          let shouldSkip = false;
+          if (this.speed > 1) {
+            // In Fast-Forward (2x, 4x, 8x, 16x): always skip intermediate frames to allow maximum speed
+            const isFinalFrameOfTick = (accumulatedTime < FRAME_DURATION) || (framesRun === maxFramesPerTick);
+            shouldSkip = !isFinalFrameOfTick;
+          } else if (this.frameSkip === 'auto') {
+            // In normal speed auto mode: skip drawing only if falling behind real-time
+            const isFinalFrameOfTick = (accumulatedTime < FRAME_DURATION) || (framesRun === maxFramesPerTick);
+            shouldSkip = (framesRun > 1 && !isFinalFrameOfTick);
+          } else if (typeof this.frameSkip === 'number' && this.frameSkip > 0) {
+            // Manual fixed frameskip (1, 2, 3, 4)
+            this.frameSkipCounter = (this.frameSkipCounter + 1) % (this.frameSkip + 1);
+            shouldSkip = (this.frameSkipCounter !== 0);
+          } else if (this.frameSkip === 0) {
+            // Frameskip OFF (0)
+            shouldSkip = false;
+          }
+
           if (this.gba.video) {
-            this.gba.video.skipDraw = !isFinalFrameOfTick;
+            this.gba.video.skipDraw = shouldSkip;
           }
 
           this.gba.advanceFrame();
@@ -281,6 +308,12 @@ export class GBAEngine {
         this.gba.audio.masterVolume = this.audioDriver.volume;
       }
     }
+  }
+
+  setFrameSkip(val) {
+    this.frameSkip = val;
+    this.frameSkipCounter = 0;
+    storage.setSetting('frameskip', val);
   }
 
   // --- Controls ---
