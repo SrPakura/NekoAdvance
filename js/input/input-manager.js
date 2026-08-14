@@ -48,6 +48,10 @@ export class InputManager {
   // --- Keyboard Listeners ---
   setupKeyboardListeners() {
     window.addEventListener('keydown', (e) => {
+      if (this.engine && this.engine.audioDriver) {
+        this.engine.audioDriver.ensureContext();
+      }
+
       // Avoid handling keys when typing in an input/textarea
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
         return;
@@ -152,6 +156,10 @@ export class InputManager {
     const press = (e) => {
       e.preventDefault();
       e.stopPropagation();
+
+      if (this.engine && this.engine.audioDriver) {
+        this.engine.audioDriver.ensureContext();
+      }
 
       if (this.menuHandler && this.menuHandler.isOpen) {
         this.menuHandler.handleButton(gbaButton, true);
