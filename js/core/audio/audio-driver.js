@@ -8,23 +8,28 @@
  */
 
 export class AudioDriver {
-    constructor(sampleRate = 44100, bufferSize = 2048) {
-        this.sampleRate = sampleRate;
+    constructor(sourceSampleRate = 44100, bufferSize = 2048) {
+        this.sourceSampleRate = sourceSampleRate;
         this.bufferSize = bufferSize;
         this.ctx = null;
+        this.gainNode = null;
         this.node = null;
+        this.dummySource = null;
         this.volume = 0.8;
         this.muteOnFastForward = true;
         this.isMuted = false;
 
         // Ring Buffer (Circular Queue) for Stereo PCM Samples (Float32)
-        // Capacity: 32768 samples (~0.75 seconds of audio buffer)
+        // Capacity: 65536 samples (~1.5 seconds of audio buffer)
         this.ringCapacity = 65536;
         this.ringBufferL = new Float32Array(this.ringCapacity);
         this.ringBufferR = new Float32Array(this.ringCapacity);
         this.writePtr = 0;
         this.readPtr = 0;
         this.availableSamples = 0;
+
+        // Fractional resampling index
+        this.resamplePhase = 0;
     }
 
     ensureContext() {
@@ -32,10 +37,7 @@ export class AudioDriver {
             const AudioCtx = window.AudioContext || window.webkitAudioContext;
             if (!AudioCtx) return;
             try {
-                this.ctx = new AudioCtx({
-                    latencyHint: 'interactive',
-                    sampleRate: this.sampleRate
-                });
+                this.ctx = new AudioCtx({ latencyHint: 'interactive' });
             } catch (e) {
                 this.ctx = new AudioCtx();
             }
@@ -50,10 +52,32 @@ export class AudioDriver {
     setupAudioNode() {
         if (!this.ctx) return;
 
-        // Create ScriptProcessorNode for maximum compatibility across mobile and desktop
-        this.node = this.ctx.createScriptProcessor(this.bufferSize, 0, 2);
-        this.node.onaudioprocess = (e) => this.processAudio(e);
-        this.node.connect(this.ctx.destination);
+        try {
+            // Master Gain Node for smooth volume control & fast-forward muting
+            this.gainNode = this.ctx.createGain();
+            this.gainNode.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
+            this.gainNode.connect(this.ctx.destination);
+
+            // Create ScriptProcessorNode (2 inputs, 2 outputs)
+            this.node = this.ctx.createScriptProcessor(this.bufferSize, 2, 2);
+            this.node.onaudioprocess = (e) => this.processAudio(e);
+
+            // Connect a silent keep-alive dummy buffer to prevent browser garbage-collection
+            const silentBuffer = this.ctx.createBuffer(2, this.ctx.sampleRate, this.ctx.sampleRate);
+            this.dummySource = this.ctx.createBufferSource();
+            this.dummySource.buffer = silentBuffer;
+            this.dummySource.loop = true;
+            this.dummySource.connect(this.node);
+            this.dummySource.start(0);
+
+            this.node.connect(this.gainNode);
+
+            // Store global references so V8 never GCs the audio processor node
+            window.__nekoAudioDriverNode = this.node;
+            window.__nekoAudioDriverDummy = this.dummySource;
+        } catch (err) {
+            console.error('[AudioDriver] Error setting up audio pipeline:', err);
+        }
     }
 
     processAudio(e) {
@@ -67,16 +91,32 @@ export class AudioDriver {
             return;
         }
 
-        const vol = this.volume;
+        // Resample ratio: mGBA output rate (44100) / Hardware device sample rate (e.g. 48000)
+        const targetRate = this.ctx ? this.ctx.sampleRate : this.sourceSampleRate;
+        const resampleStep = this.sourceSampleRate / targetRate;
 
         for (let i = 0; i < length; i++) {
-            if (this.availableSamples > 0) {
-                outputL[i] = this.ringBufferL[this.readPtr] * vol;
-                outputR[i] = this.ringBufferR[this.readPtr] * vol;
-                this.readPtr = (this.readPtr + 1) % this.ringCapacity;
-                this.availableSamples--;
+            if (this.availableSamples >= 2) {
+                const idxA = this.readPtr;
+                const idxB = (this.readPtr + 1) % this.ringCapacity;
+                const frac = this.resamplePhase;
+
+                // Linear interpolation for crystal clear sound without pitch artifacts
+                const left = this.ringBufferL[idxA] * (1 - frac) + this.ringBufferL[idxB] * frac;
+                const right = this.ringBufferR[idxA] * (1 - frac) + this.ringBufferR[idxB] * frac;
+
+                outputL[i] = left;
+                outputR[i] = right;
+
+                this.resamplePhase += resampleStep;
+                while (this.resamplePhase >= 1.0) {
+                    this.resamplePhase -= 1.0;
+                    this.readPtr = (this.readPtr + 1) % this.ringCapacity;
+                    this.availableSamples--;
+                    if (this.availableSamples <= 0) break;
+                }
             } else {
-                // Buffer Underrun: output silence to avoid loud pops
+                // Buffer Underrun: soft decay to 0
                 outputL[i] = 0;
                 outputR[i] = 0;
             }
@@ -89,6 +129,11 @@ export class AudioDriver {
      */
     writeSamples(samples) {
         if (!samples || samples.length === 0) return;
+
+        // Auto-resume if suspended
+        if (this.ctx && this.ctx.state === 'suspended') {
+            this.ctx.resume().catch(() => {});
+        }
 
         const count = samples.length >> 1; // Number of stereo pairs
         const isInt16 = samples instanceof Int16Array;
@@ -114,16 +159,23 @@ export class AudioDriver {
 
     setVolume(val) {
         this.volume = Math.max(0, Math.min(1, val));
+        if (this.gainNode && this.ctx) {
+            this.gainNode.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
+        }
     }
 
     setMute(mute) {
         this.isMuted = !!mute;
+        if (this.gainNode && this.ctx) {
+            this.gainNode.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
+        }
     }
 
     clear() {
         this.writePtr = 0;
         this.readPtr = 0;
         this.availableSamples = 0;
+        this.resamplePhase = 0;
         this.ringBufferL.fill(0);
         this.ringBufferR.fill(0);
     }

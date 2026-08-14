@@ -144,7 +144,9 @@ export class MGBABridge {
             const audioPtr = this.module._mgba_get_audio_buffer();
             const count = this.module._mgba_get_audio_samples_count ? this.module._mgba_get_audio_samples_count() : 0;
             if (audioPtr && count > 0 && this.module.HEAP16) {
-                return new Int16Array(this.module.HEAP16.buffer, audioPtr, count * 2);
+                const elemOffset = audioPtr >> 1;
+                const totalSamples = count * 2;
+                return this.module.HEAP16.slice(elemOffset, elemOffset + totalSamples);
             }
         }
         return null;

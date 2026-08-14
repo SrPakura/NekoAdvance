@@ -200,6 +200,11 @@ export class GBAEngine {
           if (this.useMgba && this.mgbaBridge.isRomLoaded) {
             const buf = this.mgbaBridge.runFrame();
             if (buf) this.pixelBuffer = buf;
+
+            const audioSamples = this.mgbaBridge.getAudioSamples();
+            if (audioSamples && audioSamples.length > 0) {
+              this.audioDriver.writeSamples(audioSamples);
+            }
           } else if (this.gba) {
             this.gba.advanceFrame();
             if (this.gba.video && this.gba.video.renderPath && this.gba.video.renderPath.pixelData) {
@@ -215,14 +220,8 @@ export class GBAEngine {
           this.renderer.renderFrame(this.pixelBuffer);
         }
 
-        // Read Audio Samples if using WASM core
+        // Check if save data is updated periodically (every 300 frames / ~5 sec)
         if (this.useMgba) {
-          const audioSamples = this.mgbaBridge.getAudioSamples();
-          if (audioSamples && audioSamples.length > 0) {
-            this.audioDriver.writeSamples(audioSamples);
-          }
-
-          // Check if save data is updated periodically (every 300 frames / ~5 sec)
           if (this.frameCount % 300 === 0) {
             try {
               const currentSave = this.mgbaBridge.getSaveData();
@@ -313,6 +312,9 @@ export class GBAEngine {
 
   // --- Controls ---
   setButton(button, isPressed) {
+    if (isPressed) {
+      this.audioDriver.ensureContext();
+    }
     const mask = 1 << button;
     
     // Send to mGBA Bridge
