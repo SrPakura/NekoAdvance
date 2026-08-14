@@ -222,10 +222,14 @@ export class GBAEngine {
             this.audioDriver.writeSamples(audioSamples);
           }
 
-          // Check if save data is updated periodically
-          const currentSave = this.mgbaBridge.getSaveData();
-          if (currentSave && currentSave.length > 0) {
-            storage.saveBattery(this.romId, currentSave.buffer);
+          // Check if save data is updated periodically (every 300 frames / ~5 sec)
+          if (this.frameCount % 300 === 0) {
+            try {
+              const currentSave = this.mgbaBridge.getSaveData();
+              if (currentSave && currentSave.length > 0) {
+                storage.saveBattery(this.romId, currentSave.buffer);
+              }
+            } catch (e) {}
           }
         } else if (this.gba && this.gba.mmu && this.gba.mmu.save && this.gba.mmu.save.writePending) {
           this.gba.mmu.save.writePending = false;
