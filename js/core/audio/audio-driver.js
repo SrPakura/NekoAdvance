@@ -51,8 +51,8 @@ class NekoAudioProcessor extends AudioWorkletProcessor {
   writeSamples(samples, isInt16) {
     if (!samples || samples.length === 0) return;
     const count = samples.length >> 1; // Stereo pairs
-    // With mGBA masterVolume=256, max peak amplitude is 24576 (int16 PCM)
-    const norm = isInt16 ? (1.0 / 24576.0) : 1.0;
+    // Standard 16-bit PCM normalization
+    const norm = isInt16 ? (1.0 / 32768.0) : 1.0;
 
     let peak = 0;
     for (let i = 0; i < count; i++) {
@@ -307,6 +307,24 @@ export class AudioDriver {
     // Master Gain Node
     this.gainNode = this.ctx.createGain();
     this.gainNode.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
+
+    // Lowpass Filter (simulates GBA hardware analog lowpass filter, removing DAC quantization noise)
+    this.lowpassFilter = this.ctx.createBiquadFilter();
+    this.lowpassFilter.type = 'lowpass';
+    this.lowpassFilter.frequency.setValueAtTime(15000, this.ctx.currentTime);
+    this.lowpassFilter.Q.setValueAtTime(0.707, this.ctx.currentTime);
+
+    // Anti-Clipping Soft Limiter
+    this.limiter = this.ctx.createDynamicsCompressor();
+    this.limiter.threshold.setValueAtTime(-1.5, this.ctx.currentTime);
+    this.limiter.knee.setValueAtTime(3.0, this.ctx.currentTime);
+    this.limiter.ratio.setValueAtTime(12.0, this.ctx.currentTime);
+    this.limiter.attack.setValueAtTime(0.003, this.ctx.currentTime);
+    this.limiter.release.setValueAtTime(0.05, this.ctx.currentTime);
+
+    // Chain: lowpass -> limiter -> gain -> destination
+    this.lowpassFilter.connect(this.limiter);
+    this.limiter.connect(this.gainNode);
     this.gainNode.connect(this.ctx.destination);
 
     // Try AudioWorklet first unless forceScriptProcessor is active
@@ -336,10 +354,10 @@ export class AudioDriver {
           }
         };
 
-        this.workletNode.connect(this.gainNode);
+        this.workletNode.connect(this.lowpassFilter);
         this.isWorkletActive = true;
         this.stats.mode = 'AudioWorklet (Dedicated Audio Thread)';
-        console.log('[AudioDriver] 🚀 AudioWorklet pipeline initialized successfully.');
+        console.log('[AudioDriver] 🚀 AudioWorklet pipeline initialized with GBA filter.');
         workletSuccess = true;
       } catch (err) {
         console.warn('[AudioDriver] AudioWorklet init failed, falling back to ScriptProcessor:', err);
@@ -352,10 +370,10 @@ export class AudioDriver {
         // Standard generator node: 0 inputs, 2 outputs
         this.scriptNode = this.ctx.createScriptProcessor(this.bufferSize, 0, 2);
         this.scriptNode.onaudioprocess = (e) => this.processScriptAudio(e);
-        this.scriptNode.connect(this.gainNode);
+        this.scriptNode.connect(this.lowpassFilter);
         this.isWorkletActive = false;
         this.stats.mode = 'ScriptProcessor (Direct WebAudio Fallback)';
-        console.log('[AudioDriver] ⚙️ ScriptProcessor pipeline initialized.');
+        console.log('[AudioDriver] ⚙️ ScriptProcessor pipeline initialized with GBA filter.');
       } catch (err) {
         console.error('[AudioDriver] Failed to create audio processor:', err);
         this.stats.mode = 'Pipeline Error';
@@ -383,7 +401,7 @@ export class AudioDriver {
 
     const count = samples.length >> 1;
     const isInt16 = samples instanceof Int16Array;
-    const norm = isInt16 ? (1.0 / 24576.0) : 1.0;
+    const norm = isInt16 ? (1.0 / 32768.0) : 1.0;
 
     let peak = 0;
     for (let i = 0; i < samples.length; i++) {
