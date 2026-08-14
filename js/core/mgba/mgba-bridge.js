@@ -143,6 +143,12 @@ export class MGBABridge {
         if (this.module && typeof this.module._mgba_get_audio_buffer === 'function') {
             const audioPtr = this.module._mgba_get_audio_buffer();
             const count = this.module._mgba_get_audio_samples_count ? this.module._mgba_get_audio_samples_count() : 0;
+            
+            if (this._audioDebugCount === undefined) this._audioDebugCount = 0;
+            if (this._audioDebugCount++ < 5) {
+                console.log('[MGBABridge] Audio Frame #' + this._audioDebugCount + ' | audioPtr:', audioPtr, '| count:', count, '| HEAP16:', !!this.module.HEAP16);
+            }
+
             if (audioPtr && count > 0 && this.module.HEAP16) {
                 const elemOffset = audioPtr >> 1;
                 const totalSamples = count * 2;

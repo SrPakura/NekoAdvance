@@ -14,7 +14,6 @@ export class AudioDriver {
         this.ctx = null;
         this.gainNode = null;
         this.node = null;
-        this.dummySource = null;
         this.volume = 0.8;
         this.muteOnFastForward = true;
         this.isMuted = false;
@@ -30,14 +29,22 @@ export class AudioDriver {
 
         // Fractional resampling index
         this.resamplePhase = 0;
+
+        // Diagnostics
+        this.debugTicks = 0;
+        this.debugSamplesWritten = 0;
     }
 
     ensureContext() {
         if (!this.ctx) {
             const AudioCtx = window.AudioContext || window.webkitAudioContext;
-            if (!AudioCtx) return;
+            if (!AudioCtx) {
+                console.error('[AudioDriver] Web Audio API is not supported in this browser');
+                return;
+            }
             try {
                 this.ctx = new AudioCtx({ latencyHint: 'interactive' });
+                console.log('[AudioDriver] AudioContext created. SampleRate:', this.ctx.sampleRate, 'State:', this.ctx.state);
             } catch (e) {
                 this.ctx = new AudioCtx();
             }
@@ -45,7 +52,11 @@ export class AudioDriver {
         }
 
         if (this.ctx && this.ctx.state === 'suspended') {
-            this.ctx.resume().catch(() => {});
+            this.ctx.resume().then(() => {
+                console.log('[AudioDriver] AudioContext resumed -> state:', this.ctx?.state);
+            }).catch((err) => {
+                console.warn('[AudioDriver] AudioContext resume note:', err);
+            });
         }
     }
 
@@ -53,34 +64,30 @@ export class AudioDriver {
         if (!this.ctx) return;
 
         try {
-            // Master Gain Node for smooth volume control & fast-forward muting
+            // Master Gain Node for volume control
             this.gainNode = this.ctx.createGain();
             this.gainNode.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
             this.gainNode.connect(this.ctx.destination);
 
-            // Create ScriptProcessorNode (2 inputs, 2 outputs)
-            this.node = this.ctx.createScriptProcessor(this.bufferSize, 2, 2);
+            // ScriptProcessorNode with 0 inputs, 2 outputs
+            this.node = this.ctx.createScriptProcessor(this.bufferSize, 0, 2);
             this.node.onaudioprocess = (e) => this.processAudio(e);
-
-            // Connect a silent keep-alive dummy buffer to prevent browser garbage-collection
-            const silentBuffer = this.ctx.createBuffer(2, this.ctx.sampleRate, this.ctx.sampleRate);
-            this.dummySource = this.ctx.createBufferSource();
-            this.dummySource.buffer = silentBuffer;
-            this.dummySource.loop = true;
-            this.dummySource.connect(this.node);
-            this.dummySource.start(0);
-
             this.node.connect(this.gainNode);
 
-            // Store global references so V8 never GCs the audio processor node
+            // Keep global window reference so V8 GC never reclaims the audio node
             window.__nekoAudioDriverNode = this.node;
-            window.__nekoAudioDriverDummy = this.dummySource;
+            console.log('[AudioDriver] Audio node connected to output destination successfully.');
         } catch (err) {
             console.error('[AudioDriver] Error setting up audio pipeline:', err);
         }
     }
 
     processAudio(e) {
+        this.debugTicks++;
+        if (this.debugTicks === 1 || this.debugTicks === 120) {
+            console.log('[AudioDriver] processAudio tick #' + this.debugTicks + ' | RingBuffer available samples:', this.availableSamples, '| Vol:', this.volume, '| State:', this.ctx?.state);
+        }
+
         const outputL = e.outputBuffer.getChannelData(0);
         const outputR = e.outputBuffer.getChannelData(1);
         const length = outputL.length;
@@ -116,7 +123,7 @@ export class AudioDriver {
                     if (this.availableSamples <= 0) break;
                 }
             } else {
-                // Buffer Underrun: soft decay to 0
+                // Buffer Underrun: soft silence
                 outputL[i] = 0;
                 outputR[i] = 0;
             }
@@ -129,6 +136,15 @@ export class AudioDriver {
      */
     writeSamples(samples) {
         if (!samples || samples.length === 0) return;
+
+        if (this.debugSamplesWritten === 0) {
+            let maxVal = 0;
+            for (let i = 0; i < Math.min(100, samples.length); i++) {
+                maxVal = Math.max(maxVal, Math.abs(samples[i]));
+            }
+            console.log('[AudioDriver] First writeSamples received: length =', samples.length, '| maxAmplitude =', maxVal, '| AudioCtx State =', this.ctx?.state);
+        }
+        this.debugSamplesWritten += samples.length;
 
         // Auto-resume if suspended
         if (this.ctx && this.ctx.state === 'suspended') {
