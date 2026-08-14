@@ -332,9 +332,9 @@ export class GBAEngine {
     if (!this.romId || !this.gba) return false;
 
     const screenshot = this.canvas.toDataURL('image/jpeg', 0.8);
-    const state = this.gba.freeze();
+    const stateBlob = Serializer.serialize(this.gba.freeze());
 
-    await storage.saveState(this.romId, slot, state, screenshot);
+    await storage.saveState(this.romId, slot, stateBlob, screenshot);
     return true;
   }
 
@@ -345,7 +345,20 @@ export class GBAEngine {
     if (!saved || !saved.data) return false;
 
     try {
-      this.gba.defrost(saved.data);
+      let stateData = saved.data;
+      if (stateData instanceof Blob) {
+        stateData = await Serializer.deserializeAsync(stateData);
+      } else if (stateData instanceof ArrayBuffer) {
+        stateData = await Serializer.deserializeAsync(new Blob([stateData], { type: Serializer.TYPE }));
+      } else if (typeof stateData === 'string') {
+        const binary = atob(stateData);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        stateData = await Serializer.deserializeAsync(new Blob([bytes], { type: Serializer.TYPE }));
+      }
+      this.gba.defrost(stateData);
       return true;
     } catch (e) {
       console.error('Error restoring save state:', e);
@@ -353,13 +366,41 @@ export class GBAEngine {
     }
   }
 
-  exportStateData() {
+  async exportStateData() {
     if (!this.romId || !this.gba) return "{}";
+    const blob = Serializer.serialize(this.gba.freeze());
+    const buffer = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const b64 = btoa(binary);
     return JSON.stringify({
       romId: this.romId,
       romName: this.romName,
       timestamp: Date.now(),
-      state: this.gba.freeze()
+      state: b64
     });
+  }
+
+  async importStateData(jsonString) {
+    if (!this.gba) return false;
+    try {
+      const obj = JSON.parse(jsonString);
+      if (!obj.state) return false;
+      const binary = atob(obj.state);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: Serializer.TYPE });
+      const defrosted = await Serializer.deserializeAsync(blob);
+      this.gba.defrost(defrosted);
+      return true;
+    } catch (e) {
+      console.error('Error importing save state:', e);
+      return false;
+    }
   }
 }

@@ -772,12 +772,12 @@ export class MenuModal {
     }
   }
 
-  exportStateJSON() {
+  async exportStateJSON() {
     if (!this.engine.romId) {
       this.hud.showToast('No hay juego en ejecución', '⚠️');
       return;
     }
-    const stateData = this.engine.exportStateData();
+    const stateData = await this.engine.exportStateData();
     const blob = new Blob([stateData], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
