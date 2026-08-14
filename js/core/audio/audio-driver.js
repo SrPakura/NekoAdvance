@@ -302,9 +302,9 @@ export class AudioDriver {
     this.gainNode.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
     this.gainNode.connect(this.ctx.destination);
 
-    // Try AudioWorklet first (Modern, glitch-free audio thread)
+    // Try AudioWorklet first unless forceScriptProcessor is active
     let workletSuccess = false;
-    if (typeof AudioWorkletNode !== 'undefined' && this.ctx.audioWorklet) {
+    if (!this.forceScriptProcessor && typeof AudioWorkletNode !== 'undefined' && this.ctx.audioWorklet) {
       try {
         const blob = new Blob([AUDIO_WORKLET_CODE], { type: 'application/javascript' });
         const blobUrl = URL.createObjectURL(blob);
@@ -570,6 +570,13 @@ export class AudioDriver {
     }
   }
 
+  async toggleEngineMode() {
+    this.forceScriptProcessor = !this.forceScriptProcessor;
+    console.log(`[AudioDriver] 🔄 Toggling audio mode. Force ScriptProcessor: ${this.forceScriptProcessor}`);
+    await this.resetPipeline();
+    return this.stats.mode;
+  }
+
   getDiagnostics() {
     if (this.ctx) {
       this.stats.contextState = this.ctx.state;
@@ -583,3 +590,4 @@ export class AudioDriver {
     };
   }
 }
+

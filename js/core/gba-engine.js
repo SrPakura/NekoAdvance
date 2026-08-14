@@ -244,12 +244,17 @@ export class GBAEngine {
           accumulatedTime = 0;
         }
 
-        // FPS Calculation
+        // FPS Calculation & Telemetry
         const elapsed = now - this.lastFpsTime;
         if (elapsed >= 1000) {
           this.currentFPS = Math.round((this.frameCount * 1000) / elapsed);
           this.frameCount = 0;
           this.lastFpsTime = now;
+
+          if (this.audioDriver) {
+            const d = this.audioDriver.getDiagnostics();
+            console.log(`[Telemetry] Core: ${this.useMgba ? 'mGBA WASM' : 'gbajs'} | FPS: ${this.currentFPS} | AudioCtx: ${d.contextState} (${d.mode}) | Vol: ${(d.volume*100).toFixed(0)}% (Peak: ${d.peakVolume.toFixed(3)}) | Buf: ${d.bufferMs}ms | Underruns: ${d.underruns}`);
+          }
         }
       } else {
         lastTime = performance.now();
