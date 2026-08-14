@@ -208,6 +208,10 @@ export class GBAEngine {
 
             const audioSamples = this.mgbaBridge.getAudioSamples();
             if (audioSamples && audioSamples.length > 0) {
+              const currentRate = this.mgbaBridge.getAudioSampleRate();
+              if (currentRate && currentRate !== this.audioDriver.sourceSampleRate) {
+                this.audioDriver.setSourceSampleRate(currentRate);
+              }
               this.audioDriver.writeSamples(audioSamples);
             }
           } else if (this.gba) {

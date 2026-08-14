@@ -179,6 +179,17 @@ export class MGBABridge {
     }
 
     /**
+     * Get dynamic GBA audio sample rate (e.g. 32768, 65536, 131072, 262144)
+     * @returns {number}
+     */
+    getAudioSampleRate() {
+        if (this.module && typeof this.module._mgba_get_audio_sample_rate === 'function') {
+            return this.module._mgba_get_audio_sample_rate();
+        }
+        return 32768;
+    }
+
+    /**
      * Update GBA Keypad bitmask
      * @param {number} buttonMask 
      * @param {boolean} pressed 
