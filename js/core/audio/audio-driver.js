@@ -84,14 +84,24 @@ export class AudioDriver {
         if (!this.ctx) return;
 
         try {
-            // Direct ScriptProcessorNode (0 inputs, 2 outputs) connected directly to destination
-            this.node = this.ctx.createScriptProcessor(this.bufferSize, 0, 2);
+            // ScriptProcessorNode with 1 input and 2 outputs
+            this.node = this.ctx.createScriptProcessor(this.bufferSize, 1, 2);
             this.node.onaudioprocess = (e) => this.processAudio(e);
+
+            // Connect a muted dummy oscillator to input 0 so Chromium/Android never suspends the audio pump
+            const osc = this.ctx.createOscillator();
+            const muteGain = this.ctx.createGain();
+            muteGain.gain.setValueAtTime(0, this.ctx.currentTime);
+            osc.connect(muteGain);
+            muteGain.connect(this.node);
+            osc.start(0);
+
             this.node.connect(this.ctx.destination);
 
-            // Store persistent global reference
+            // Store persistent global references
             window.__nekoAudioDriverNode = this.node;
-            console.log('[AudioDriver] Audio output pipeline connected directly to destination.');
+            window.__nekoAudioDriverOsc = osc;
+            console.log('[AudioDriver] Audio output pipeline connected directly to destination with active keepalive pump.');
         } catch (err) {
             console.error('[AudioDriver] Error setting up audio pipeline:', err);
         }

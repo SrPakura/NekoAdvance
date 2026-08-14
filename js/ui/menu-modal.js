@@ -8,34 +8,32 @@ import { GBA_BUTTONS } from '../core/gba-engine.js';
 
 // Synthesizer for 8-bit retro sound effects
 class RetroAudioSynth {
-  constructor() {
-    this.ctx = null;
+  constructor(audioDriver) {
+    this.audioDriver = audioDriver;
   }
 
-  init() {
-    if (!this.ctx) {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (AudioCtx) this.ctx = new AudioCtx();
+  get ctx() {
+    if (this.audioDriver) {
+      this.audioDriver.unlockAudio();
+      return this.audioDriver.ctx;
     }
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
-    }
+    return null;
   }
 
   playCursor() {
     try {
-      this.init();
-      if (!this.ctx) return;
-      const now = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const ctx = this.ctx;
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
       osc.type = 'square';
       osc.frequency.setValueAtTime(440, now);
       osc.frequency.exponentialRampToValueAtTime(880, now + 0.03);
       gain.gain.setValueAtTime(0.05, now);
       gain.gain.linearRampToValueAtTime(0.001, now + 0.03);
       osc.connect(gain);
-      gain.connect(this.ctx.destination);
+      gain.connect(ctx.destination);
       osc.start();
       osc.stop(now + 0.03);
     } catch (e) {}
@@ -43,18 +41,18 @@ class RetroAudioSynth {
 
   playTab() {
     try {
-      this.init();
-      if (!this.ctx) return;
-      const now = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const ctx = this.ctx;
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
       osc.type = 'triangle';
       osc.frequency.setValueAtTime(320, now);
       osc.frequency.linearRampToValueAtTime(640, now + 0.05);
       gain.gain.setValueAtTime(0.08, now);
       gain.gain.linearRampToValueAtTime(0.001, now + 0.05);
       osc.connect(gain);
-      gain.connect(this.ctx.destination);
+      gain.connect(ctx.destination);
       osc.start();
       osc.stop(now + 0.05);
     } catch (e) {}
@@ -62,11 +60,11 @@ class RetroAudioSynth {
 
   playSelect() {
     try {
-      this.init();
-      if (!this.ctx) return;
-      const now = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const ctx = this.ctx;
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
       osc.type = 'square';
       osc.frequency.setValueAtTime(523.25, now); // C5
       osc.frequency.setValueAtTime(659.25, now + 0.04); // E5
@@ -74,7 +72,7 @@ class RetroAudioSynth {
       gain.gain.setValueAtTime(0.06, now);
       gain.gain.linearRampToValueAtTime(0.001, now + 0.15);
       osc.connect(gain);
-      gain.connect(this.ctx.destination);
+      gain.connect(ctx.destination);
       osc.start();
       osc.stop(now + 0.15);
     } catch (e) {}
@@ -82,18 +80,18 @@ class RetroAudioSynth {
 
   playCancel() {
     try {
-      this.init();
-      if (!this.ctx) return;
-      const now = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const ctx = this.ctx;
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
       osc.type = 'sawtooth';
       osc.frequency.setValueAtTime(380, now);
       osc.frequency.linearRampToValueAtTime(190, now + 0.07);
       gain.gain.setValueAtTime(0.05, now);
       gain.gain.linearRampToValueAtTime(0.001, now + 0.07);
       osc.connect(gain);
-      gain.connect(this.ctx.destination);
+      gain.connect(ctx.destination);
       osc.start();
       osc.stop(now + 0.07);
     } catch (e) {}
@@ -114,7 +112,7 @@ export class MenuModal {
     this.isOpen = false;
     this.currentItemsCount = 0;
 
-    this.synth = new RetroAudioSynth();
+    this.synth = new RetroAudioSynth(engine ? engine.audioDriver : null);
 
     // Cache settings
     this.volume = 0.8;
