@@ -41,13 +41,14 @@ export class GBAEngine {
     // Core Bridges
     this.mgbaBridge = new MGBABridge();
     this.cheatEngine = new CheatEngine();
-    this.gba = null; // Legacy gbajs instance fallback if available
+    this.gba = null; // Fallback instance if needed
 
     this.rom = null;
     this.romName = '';
     this.romId = '';
     this.isRunning = false;
     this.isPaused = false;
+    this.useMgba = true;
 
     this.speed = 1;
     this.frameSkip = 'auto';
@@ -82,17 +83,10 @@ export class GBAEngine {
   }
 
   async initCore() {
-    // 1. Try initializing mGBA WASM bridge
-    await this.mgbaBridge.init();
-
-    // 2. Initialize legacy fallback core if available on window
-    const GBAClass = window.GameBoyAdvance || (typeof GameBoyAdvance !== 'undefined' ? GameBoyAdvance : null);
-    if (typeof GBAClass === 'function') {
-      this.gba = new GBAClass();
-      // Route audio to our central AudioDriver
-      if (this.gba.audio) {
-        this.gba.audio.masterVolume = this.audioDriver.volume;
-      }
+    try {
+      await this.mgbaBridge.init();
+    } catch (e) {
+      console.warn('[GBAEngine] mGBA WASM init note:', e);
     }
   }
 
@@ -111,49 +105,46 @@ export class GBAEngine {
 
     this.rom = arrayBuffer;
     this.romName = name;
+    this.romId = name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
 
-    // Try loading with mGBA WASM first
-    let loadedWithMgba = false;
-    try {
-      loadedWithMgba = this.mgbaBridge.loadROM(arrayBuffer, name);
-    } catch (e) {
-      console.warn('[GBAEngine] mGBA WASM loader deferred, falling back to core:', e);
-    }
+    // Ensure mGBA WASM is ready
+    await this.mgbaBridge.init();
 
-    // If gbajs is present, also prepare it for maximum compatibility
-    if (this.gba) {
-      try {
+    // 1. Primary Engine: mGBA WebAssembly
+    const mgbaSuccess = this.mgbaBridge.loadROM(arrayBuffer, name);
+    if (mgbaSuccess) {
+      this.useMgba = true;
+      console.log('[GBAEngine] Game loaded in mGBA WebAssembly Core:', name);
+    } else {
+      // 2. Fallback Engine with offscreen buffer
+      this.useMgba = false;
+      const GBAClass = window.GameBoyAdvance || (typeof GameBoyAdvance !== 'undefined' ? GameBoyAdvance : null);
+      if (typeof GBAClass === 'function') {
+        this.gba = new GBAClass();
+        // Create an offscreen canvas to avoid WebGL2 context collisions
+        const offscreenCanvas = document.createElement('canvas');
+        offscreenCanvas.width = 240;
+        offscreenCanvas.height = 160;
+        this.gba.setCanvas(offscreenCanvas);
         this.gba.setRom(arrayBuffer);
-      } catch (e) {
-        console.warn('[GBAEngine] Legacy core ROM setup:', e);
+        if (this.gba.audio) {
+          this.gba.audio.masterVolume = this.audioDriver.volume;
+        }
       }
     }
-
-    // Extract ROM ID from Title or filename
-    let title = '';
-    if (this.gba && this.gba.rom) {
-      title = (this.gba.rom.code || this.gba.rom.title || '').trim();
-    }
-    this.romId = (title || name.replace(/\.[^/.]+$/, '')).replace(/[^a-zA-Z0-9_-]/g, '_');
 
     // Load Saved Battery (.sav / Flash 128K / SRAM) from IndexedDB
     const savedBattery = await storage.loadBattery(this.romId);
     if (savedBattery && savedBattery.byteLength > 0) {
       try {
-        if (this.gba) this.gba.setSavedata(savedBattery);
-        this.mgbaBridge.loadSaveData(new Uint8Array(savedBattery));
+        if (this.useMgba) {
+          this.mgbaBridge.loadSaveData(new Uint8Array(savedBattery));
+        } else if (this.gba) {
+          this.gba.setSavedata(savedBattery);
+        }
       } catch (e) {
         console.warn('[GBAEngine] Could not restore battery save:', e);
       }
-    }
-
-    // Hook battery save flush to automatically save to IndexedDB
-    if (this.gba) {
-      this.gba.storeSavedata = () => {
-        if (this.gba.mmu && this.gba.mmu.save && this.gba.mmu.save.buffer) {
-          storage.saveBattery(this.romId, this.gba.mmu.save.buffer);
-        }
-      };
     }
 
     // Load Cheats for this ROM
@@ -206,16 +197,14 @@ export class GBAEngine {
           framesRun++;
 
           // Execute Frame in Core
-          if (this.gba) {
+          if (this.useMgba && this.mgbaBridge.isRomLoaded) {
+            const buf = this.mgbaBridge.runFrame();
+            if (buf) this.pixelBuffer = buf;
+          } else if (this.gba) {
             this.gba.advanceFrame();
-            
-            // Extract Framebuffer from GBA Video Software context
             if (this.gba.video && this.gba.video.softwareRenderer && this.gba.video.softwareRenderer.bufferedData) {
               this.pixelBuffer = this.gba.video.softwareRenderer.bufferedData;
             }
-          } else {
-            const buf = this.mgbaBridge.runFrame();
-            if (buf) this.pixelBuffer = buf;
           }
 
           this.frameCount++;
@@ -227,28 +216,24 @@ export class GBAEngine {
         }
 
         // Read Audio Samples if using WASM core
-        const audioSamples = this.mgbaBridge.getAudioSamples();
-        if (audioSamples && audioSamples.length > 0) {
-          this.audioDriver.writeSamples(audioSamples);
+        if (this.useMgba) {
+          const audioSamples = this.mgbaBridge.getAudioSamples();
+          if (audioSamples && audioSamples.length > 0) {
+            this.audioDriver.writeSamples(audioSamples);
+          }
+
+          // Check if save data is updated periodically
+          const currentSave = this.mgbaBridge.getSaveData();
+          if (currentSave && currentSave.length > 0) {
+            storage.saveBattery(this.romId, currentSave.buffer);
+          }
+        } else if (this.gba && this.gba.mmu && this.gba.mmu.save && this.gba.mmu.save.writePending) {
+          this.gba.mmu.save.writePending = false;
+          storage.saveBattery(this.romId, this.gba.mmu.save.buffer);
         }
 
         if (accumulatedTime > FRAME_DURATION * 2) {
           accumulatedTime = 0;
-        }
-
-        // Apply active cheats
-        if (this.gba && this.gba.mmu) {
-          this.cheatEngine.applyCheats({
-            write8: (addr, val) => this.gba.mmu.store8(addr, val),
-            write16: (addr, val) => this.gba.mmu.store16(addr, val),
-            write32: (addr, val) => this.gba.mmu.store32(addr, val)
-          });
-        }
-
-        // Check if battery save was marked pending and flush to storage
-        if (this.gba && this.gba.mmu && this.gba.mmu.save && this.gba.mmu.save.writePending) {
-          this.gba.mmu.save.writePending = false;
-          storage.saveBattery(this.romId, this.gba.mmu.save.buffer);
         }
 
         // FPS Calculation
@@ -347,13 +332,13 @@ export class GBAEngine {
     const screenshot = this.renderer.captureScreenshot();
 
     let stateBlob = null;
-    if (this.gba && typeof Serializer !== 'undefined') {
-      stateBlob = Serializer.serialize(this.gba.freeze());
-    } else {
+    if (this.useMgba) {
       const stateData = this.mgbaBridge.saveState();
       if (stateData) {
         stateBlob = new Blob([stateData], { type: 'application/octet-stream' });
       }
+    } else if (this.gba && typeof Serializer !== 'undefined') {
+      stateBlob = Serializer.serialize(this.gba.freeze());
     }
 
     if (stateBlob) {
@@ -371,7 +356,10 @@ export class GBAEngine {
 
     try {
       let stateData = saved.data;
-      if (this.gba && typeof Serializer !== 'undefined') {
+      if (this.useMgba) {
+        const u8 = stateData instanceof Uint8Array ? stateData : new Uint8Array(await stateData.arrayBuffer());
+        return this.mgbaBridge.loadState(u8);
+      } else if (this.gba && typeof Serializer !== 'undefined') {
         if (stateData instanceof Blob) {
           stateData = await Serializer.deserializeAsync(stateData);
         } else if (stateData instanceof ArrayBuffer) {
@@ -379,10 +367,8 @@ export class GBAEngine {
         }
         this.gba.defrost(stateData);
         return true;
-      } else {
-        const u8 = stateData instanceof Uint8Array ? stateData : new Uint8Array(await stateData.arrayBuffer());
-        return this.mgbaBridge.loadState(u8);
       }
+      return false;
     } catch (e) {
       console.error('[GBAEngine] Error restoring save state:', e);
       return false;
@@ -393,15 +379,15 @@ export class GBAEngine {
     if (!this.romId) return "{}";
     const screenshot = this.renderer.captureScreenshot();
     let b64 = '';
-    if (this.gba && typeof Serializer !== 'undefined') {
-      const blob = Serializer.serialize(this.gba.freeze());
-      const buffer = await blob.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = '';
-      for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
+    if (this.useMgba) {
+      const stateData = this.mgbaBridge.saveState();
+      if (stateData) {
+        let binary = '';
+        for (let i = 0; i < stateData.byteLength; i++) {
+          binary += String.fromCharCode(stateData[i]);
+        }
+        b64 = btoa(binary);
       }
-      b64 = btoa(binary);
     }
     return JSON.stringify({
       romId: this.romId,
@@ -421,11 +407,8 @@ export class GBAEngine {
       for (let i = 0; i < binary.length; i++) {
         bytes[i] = binary.charCodeAt(i);
       }
-      if (this.gba && typeof Serializer !== 'undefined') {
-        const blob = new Blob([bytes], { type: Serializer.TYPE });
-        const defrosted = await Serializer.deserializeAsync(blob);
-        this.gba.defrost(defrosted);
-        return true;
+      if (this.useMgba) {
+        return this.mgbaBridge.loadState(bytes);
       }
       return false;
     } catch (e) {

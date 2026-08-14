@@ -25,30 +25,23 @@ export class AudioDriver {
         this.writePtr = 0;
         this.readPtr = 0;
         this.availableSamples = 0;
-
-        this.init();
-    }
-
-    init() {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        if (!AudioCtx) {
-            console.warn('[AudioDriver] Web Audio API is not supported on this browser.');
-            return;
-        }
-
-        try {
-            this.ctx = new AudioCtx({
-                latencyHint: 'interactive',
-                sampleRate: this.sampleRate
-            });
-        } catch (e) {
-            this.ctx = new AudioCtx();
-        }
-
-        this.setupAudioNode();
     }
 
     ensureContext() {
+        if (!this.ctx) {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return;
+            try {
+                this.ctx = new AudioCtx({
+                    latencyHint: 'interactive',
+                    sampleRate: this.sampleRate
+                });
+            } catch (e) {
+                this.ctx = new AudioCtx();
+            }
+            this.setupAudioNode();
+        }
+
         if (this.ctx && this.ctx.state === 'suspended') {
             this.ctx.resume().catch(() => {});
         }
