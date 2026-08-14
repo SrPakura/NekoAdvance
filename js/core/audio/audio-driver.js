@@ -51,8 +51,8 @@ class NekoAudioProcessor extends AudioWorkletProcessor {
   writeSamples(samples, isInt16) {
     if (!samples || samples.length === 0) return;
     const count = samples.length >> 1; // Stereo pairs
-    // GBA audio synthesis produces samples in the -384 to +384 range
-    const norm = isInt16 ? (1.0 / 384.0) : 1.0;
+    // With mGBA masterVolume=256, max peak amplitude is 24576 (int16 PCM)
+    const norm = isInt16 ? (1.0 / 24576.0) : 1.0;
 
     let peak = 0;
     for (let i = 0; i < count; i++) {
@@ -383,7 +383,7 @@ export class AudioDriver {
 
     const count = samples.length >> 1;
     const isInt16 = samples instanceof Int16Array;
-    const norm = isInt16 ? (1.0 / 384.0) : 1.0;
+    const norm = isInt16 ? (1.0 / 24576.0) : 1.0;
 
     let peak = 0;
     for (let i = 0; i < samples.length; i++) {
