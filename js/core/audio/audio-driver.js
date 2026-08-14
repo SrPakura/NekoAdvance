@@ -12,7 +12,6 @@ export class AudioDriver {
         this.sourceSampleRate = sourceSampleRate;
         this.bufferSize = bufferSize;
         this.ctx = null;
-        this.gainNode = null;
         this.node = null;
         this.volume = 0.8;
         this.muteOnFastForward = true;
@@ -33,6 +32,10 @@ export class AudioDriver {
         // Diagnostics
         this.debugTicks = 0;
         this.debugSamplesWritten = 0;
+        this._loggedNonZero = false;
+
+        // Expose test tone on window
+        window.nekoPlayTestTone = () => this.playTestTone();
     }
 
     ensureContext() {
@@ -44,7 +47,7 @@ export class AudioDriver {
             }
             try {
                 this.ctx = new AudioCtx({ latencyHint: 'interactive' });
-                console.log('[AudioDriver] AudioContext created. SampleRate:', this.ctx.sampleRate, 'State:', this.ctx.state);
+                console.log('[AudioDriver] AudioContext initialized. Hardware SampleRate:', this.ctx.sampleRate, 'State:', this.ctx.state);
             } catch (e) {
                 this.ctx = new AudioCtx();
             }
@@ -55,7 +58,7 @@ export class AudioDriver {
             this.ctx.resume().then(() => {
                 console.log('[AudioDriver] AudioContext resumed -> state:', this.ctx?.state);
             }).catch((err) => {
-                console.warn('[AudioDriver] AudioContext resume note:', err);
+                console.warn('[AudioDriver] AudioContext resume error:', err);
             });
         }
     }
@@ -64,30 +67,37 @@ export class AudioDriver {
         if (!this.ctx) return;
 
         try {
-            // Master Gain Node for volume control
-            this.gainNode = this.ctx.createGain();
-            this.gainNode.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
-            this.gainNode.connect(this.ctx.destination);
-
-            // ScriptProcessorNode with 0 inputs, 2 outputs
+            // Direct ScriptProcessorNode (0 inputs, 2 outputs) connected directly to destination
             this.node = this.ctx.createScriptProcessor(this.bufferSize, 0, 2);
             this.node.onaudioprocess = (e) => this.processAudio(e);
-            this.node.connect(this.gainNode);
+            this.node.connect(this.ctx.destination);
 
-            // Keep global window reference so V8 GC never reclaims the audio node
+            // Store persistent global reference
             window.__nekoAudioDriverNode = this.node;
-            console.log('[AudioDriver] Audio node connected to output destination successfully.');
+            console.log('[AudioDriver] Audio output pipeline connected directly to destination.');
         } catch (err) {
             console.error('[AudioDriver] Error setting up audio pipeline:', err);
         }
     }
 
+    playTestTone() {
+        this.ensureContext();
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440, this.ctx.currentTime); // 440Hz A
+        gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.5);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.5);
+        console.log('[AudioDriver] 🔔 Test tone (440Hz) played successfully.');
+    }
+
     processAudio(e) {
         this.debugTicks++;
-        if (this.debugTicks === 1 || this.debugTicks === 120) {
-            console.log('[AudioDriver] processAudio tick #' + this.debugTicks + ' | RingBuffer available samples:', this.availableSamples, '| Vol:', this.volume, '| State:', this.ctx?.state);
-        }
-
         const outputL = e.outputBuffer.getChannelData(0);
         const outputR = e.outputBuffer.getChannelData(1);
         const length = outputL.length;
@@ -98,9 +108,13 @@ export class AudioDriver {
             return;
         }
 
+        const vol = this.volume;
+
         // Resample ratio: mGBA output rate (44100) / Hardware device sample rate (e.g. 48000)
         const targetRate = this.ctx ? this.ctx.sampleRate : this.sourceSampleRate;
         const resampleStep = this.sourceSampleRate / targetRate;
+
+        let maxOut = 0;
 
         for (let i = 0; i < length; i++) {
             if (this.availableSamples >= 2) {
@@ -109,11 +123,13 @@ export class AudioDriver {
                 const frac = this.resamplePhase;
 
                 // Linear interpolation for crystal clear sound without pitch artifacts
-                const left = this.ringBufferL[idxA] * (1 - frac) + this.ringBufferL[idxB] * frac;
-                const right = this.ringBufferR[idxA] * (1 - frac) + this.ringBufferR[idxB] * frac;
+                const left = (this.ringBufferL[idxA] * (1 - frac) + this.ringBufferL[idxB] * frac) * vol;
+                const right = (this.ringBufferR[idxA] * (1 - frac) + this.ringBufferR[idxB] * frac) * vol;
 
                 outputL[i] = left;
                 outputR[i] = right;
+
+                if (Math.abs(left) > maxOut) maxOut = Math.abs(left);
 
                 this.resamplePhase += resampleStep;
                 while (this.resamplePhase >= 1.0) {
@@ -128,6 +144,10 @@ export class AudioDriver {
                 outputR[i] = 0;
             }
         }
+
+        if (this.debugTicks === 60 || this.debugTicks === 240) {
+            console.log('[AudioDriver] Audio Process Tick #' + this.debugTicks + ' | RingBuffer queue:', this.availableSamples, '| MaxOut Amplitude:', maxOut.toFixed(4), '| Vol:', vol);
+        }
     }
 
     /**
@@ -137,19 +157,25 @@ export class AudioDriver {
     writeSamples(samples) {
         if (!samples || samples.length === 0) return;
 
-        if (this.debugSamplesWritten === 0) {
-            let maxVal = 0;
-            for (let i = 0; i < Math.min(100, samples.length); i++) {
-                maxVal = Math.max(maxVal, Math.abs(samples[i]));
-            }
-            console.log('[AudioDriver] First writeSamples received: length =', samples.length, '| maxAmplitude =', maxVal, '| AudioCtx State =', this.ctx?.state);
-        }
-        this.debugSamplesWritten += samples.length;
-
         // Auto-resume if suspended
         if (this.ctx && this.ctx.state === 'suspended') {
             this.ctx.resume().catch(() => {});
         }
+
+        let nonZeroCount = 0;
+        let maxVal = 0;
+        for (let i = 0; i < samples.length; i++) {
+            const val = Math.abs(samples[i]);
+            if (val > 0) nonZeroCount++;
+            if (val > maxVal) maxVal = val;
+        }
+
+        if (nonZeroCount > 0 && !this._loggedNonZero) {
+            this._loggedNonZero = true;
+            console.log('[AudioDriver] 🔊 NON-ZERO GBA AUDIO DETECTED! Sample Count:', samples.length, '| Max Value:', maxVal, '(PCM range: 0-32767)');
+        }
+
+        this.debugSamplesWritten += samples.length;
 
         const count = samples.length >> 1; // Number of stereo pairs
         const isInt16 = samples instanceof Int16Array;
@@ -175,16 +201,10 @@ export class AudioDriver {
 
     setVolume(val) {
         this.volume = Math.max(0, Math.min(1, val));
-        if (this.gainNode && this.ctx) {
-            this.gainNode.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
-        }
     }
 
     setMute(mute) {
         this.isMuted = !!mute;
-        if (this.gainNode && this.ctx) {
-            this.gainNode.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
-        }
     }
 
     clear() {

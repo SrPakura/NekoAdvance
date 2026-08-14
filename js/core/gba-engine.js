@@ -80,6 +80,11 @@ export class GBAEngine {
     if (savedColorCorrection !== null && savedColorCorrection !== undefined) {
       this.renderer.setColorCorrection(savedColorCorrection);
     }
+
+    const savedVol = await storage.getSetting('volume');
+    if (savedVol !== null && savedVol !== undefined) {
+      this.audioDriver.setVolume(savedVol);
+    }
   }
 
   async initCore() {
