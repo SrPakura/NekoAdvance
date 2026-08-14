@@ -180,8 +180,10 @@ class GameBoyAdvanceVideo {
 		return this.inVblank | (this.inHblank << 1) | (this.vcounter << 2);
 	}
 	finishDraw(pixelData) {
-		this.context.putImageData(pixelData, 0, 0);
-		this.drawCallback();
+		if (!this.skipDraw) {
+			this.context.putImageData(pixelData, 0, 0);
+			this.drawCallback();
+		}
 	}
 }
 

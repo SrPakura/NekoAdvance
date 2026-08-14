@@ -67,11 +67,6 @@ export class GBAEngine {
     if (typeof GBAClass === 'function') {
       this.gba = new GBAClass();
       this.gba.setCanvas(this.canvas);
-      const originalDraw = this.gba.video.drawCallback;
-      this.gba.video.drawCallback = () => {
-        if (originalDraw) originalDraw();
-        this.frameCount++;
-      };
       if (this.gba.audio) {
         this.gba.audio.masterVolume = this.audioDriver.volume;
       }
@@ -158,13 +153,48 @@ export class GBAEngine {
       cancelAnimationFrame(this.animFrameId);
     }
 
+    const FRAME_DURATION = 1000 / 59.7275; // ~16.742 ms per GBA frame
+    let lastTime = performance.now();
+    let accumulatedTime = 0;
+
     const step = () => {
       if (this.isRunning && !this.isPaused && this.gba) {
         const now = performance.now();
+        let delta = now - lastTime;
+        lastTime = now;
 
-        // Run frame(s) according to speed multiplier
-        for (let i = 0; i < this.speed; i++) {
+        // Clamp delta to prevent huge backlog if tab was minimized or suffered a large lag spike
+        if (delta > 200) delta = 200;
+        if (delta < 0) delta = 0;
+
+        accumulatedTime += delta * this.speed;
+
+        // Limit maximum frames per single RAF cycle to prevent lag spikes
+        const maxFramesPerTick = Math.max(6, Math.ceil(this.speed * 2.5));
+        let framesRun = 0;
+
+        while (accumulatedTime >= FRAME_DURATION && framesRun < maxFramesPerTick) {
+          accumulatedTime -= FRAME_DURATION;
+          framesRun++;
+
+          // Auto-Frameskip: skip heavy canvas drawing on intermediate frames
+          const isFinalFrameOfTick = (accumulatedTime < FRAME_DURATION) || (framesRun === maxFramesPerTick);
+          if (this.gba.video) {
+            this.gba.video.skipDraw = !isFinalFrameOfTick;
+          }
+
           this.gba.advanceFrame();
+          this.frameCount++;
+        }
+
+        // Ensure skipDraw is reset for next iteration
+        if (this.gba.video) {
+          this.gba.video.skipDraw = false;
+        }
+
+        // If still lagging behind max frames, drop excess accumulated time to stay in real-time
+        if (accumulatedTime > FRAME_DURATION * 2) {
+          accumulatedTime = 0;
         }
 
         // Apply active cheats
@@ -182,13 +212,16 @@ export class GBAEngine {
           storage.saveBattery(this.romId, this.gba.mmu.save.buffer);
         }
 
-        // FPS Calculation
+        // FPS Calculation (Actual internal GBA emulation speed)
         const elapsed = now - this.lastFpsTime;
         if (elapsed >= 1000) {
           this.currentFPS = Math.round((this.frameCount * 1000) / elapsed);
           this.frameCount = 0;
           this.lastFpsTime = now;
         }
+      } else {
+        lastTime = performance.now();
+        accumulatedTime = 0;
       }
 
       if (this.isRunning) {
