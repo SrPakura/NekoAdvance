@@ -51,13 +51,20 @@ class NekoAudioProcessor extends AudioWorkletProcessor {
   writeSamples(samples, isInt16) {
     if (!samples || samples.length === 0) return;
     const count = samples.length >> 1; // Stereo pairs
-    const norm = isInt16 ? (1.0 / 32768.0) : 1.0;
+    // GBA audio synthesis produces samples in the -384 to +384 range
+    const norm = isInt16 ? (1.0 / 384.0) : 1.0;
 
     let peak = 0;
     for (let i = 0; i < count; i++) {
       const idx = i << 1;
-      const left = samples[idx] * norm;
-      const right = samples[idx + 1] * norm;
+      let left = samples[idx] * norm;
+      let right = samples[idx + 1] * norm;
+
+      // Soft clamp to [-1.0, 1.0]
+      if (left > 1.0) left = 1.0;
+      else if (left < -1.0) left = -1.0;
+      if (right > 1.0) right = 1.0;
+      else if (right < -1.0) right = -1.0;
 
       const absL = Math.abs(left);
       const absR = Math.abs(right);
@@ -376,11 +383,11 @@ export class AudioDriver {
 
     const count = samples.length >> 1;
     const isInt16 = samples instanceof Int16Array;
-    const norm = isInt16 ? (1.0 / 32768.0) : 1.0;
+    const norm = isInt16 ? (1.0 / 384.0) : 1.0;
 
     let peak = 0;
     for (let i = 0; i < samples.length; i++) {
-      const val = Math.abs(samples[i]) * norm;
+      const val = Math.min(1.0, Math.abs(samples[i]) * norm);
       if (val > peak) peak = val;
     }
     this.stats.peakVolume = peak;
@@ -397,8 +404,13 @@ export class AudioDriver {
     // ScriptProcessor Ring Buffer Push
     for (let i = 0; i < count; i++) {
       const idx = i << 1;
-      const left = samples[idx] * norm;
-      const right = samples[idx + 1] * norm;
+      let left = samples[idx] * norm;
+      let right = samples[idx + 1] * norm;
+
+      if (left > 1.0) left = 1.0;
+      else if (left < -1.0) left = -1.0;
+      if (right > 1.0) right = 1.0;
+      else if (right < -1.0) right = -1.0;
 
       this.ringBufferL[this.writePtr] = left;
       this.ringBufferR[this.writePtr] = right;
