@@ -39,12 +39,13 @@ export class MGBABridge {
     }
 
     async init() {
-        if (this.isLoaded && this.module) return true;
+        if (this.module && typeof this.module._mgba_load_rom === 'function') {
+            return true;
+        }
 
         try {
             console.log('[MGBABridge] Initializing mGBA WebAssembly core...');
             
-            // Dynamic import of mgba.js if not present on window
             let mGBAFactory = window.mGBA;
             if (typeof mGBAFactory !== 'function') {
                 try {
@@ -63,14 +64,14 @@ export class MGBABridge {
                 if (this.module && typeof this.module._mgba_init === 'function') {
                     this.module._mgba_init();
                 }
+                this.isLoaded = true;
                 console.log('[MGBABridge] mGBA WebAssembly Core initialized successfully.');
+                return true;
             }
 
-            this.isLoaded = true;
-            return true;
+            return false;
         } catch (err) {
             console.warn('[MGBABridge] Native WASM Module loading note:', err);
-            this.isLoaded = true;
             return false;
         }
     }
@@ -80,7 +81,11 @@ export class MGBABridge {
      * @param {ArrayBuffer|Uint8Array} romBuffer 
      * @param {string} filename 
      */
-    loadROM(romBuffer, filename = 'game.gba') {
+    async loadROM(romBuffer, filename = 'game.gba') {
+        if (!this.module || typeof this.module._mgba_load_rom !== 'function') {
+            await this.init();
+        }
+
         const u8 = romBuffer instanceof Uint8Array ? romBuffer : new Uint8Array(romBuffer);
         
         if (this.module && typeof this.module._mgba_load_rom === 'function') {

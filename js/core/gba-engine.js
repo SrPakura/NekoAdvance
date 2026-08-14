@@ -111,7 +111,7 @@ export class GBAEngine {
     await this.mgbaBridge.init();
 
     // 1. Primary Engine: mGBA WebAssembly
-    const mgbaSuccess = this.mgbaBridge.loadROM(arrayBuffer, name);
+    const mgbaSuccess = await this.mgbaBridge.loadROM(arrayBuffer, name);
     if (mgbaSuccess) {
       this.useMgba = true;
       console.log('[GBAEngine] Game loaded in mGBA WebAssembly Core:', name);
