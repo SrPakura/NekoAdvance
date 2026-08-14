@@ -35,8 +35,8 @@ export class GBAEngine {
     // Hardware WebGL2 Renderer with Retro Shaders
     this.renderer = new WebGLRenderer(canvas);
     
-    // Audio Subsystem
-    this.audioDriver = new AudioDriver(44100, 2048);
+    // Audio Subsystem (Native GBA ~32,768 Hz Audio Clock)
+    this.audioDriver = new AudioDriver(32768, 2048);
 
     // Core Bridges
     this.mgbaBridge = new MGBABridge();

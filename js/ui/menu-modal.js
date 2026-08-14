@@ -550,6 +550,7 @@ export class MenuModal {
       { id: 'frameskip', title: 'SALTO DE FRAMES (FRAMESKIP)', val: `◄ ${currentFrameSkip} ►`, badge: 'FPS' },
       { id: 'muteFF', title: 'SILENCIAR EN AVANCE RÁPIDO', val: `◄ ${muteFF} ►`, badgeClass: muteFFBadge },
       { id: 'volume', title: 'VOLUMEN PRINCIPAL', val: `◄ ${volPercent}% ►`, badge: 'AUDIO' },
+      { id: 'diag', title: 'DIAGNÓSTICO AUDIO & MOTOR', val: '[VER EN VIVO]', badge: 'DEBUG' },
       { id: 'haptic', title: 'VIBRACIÓN HÁPTICA', val: `◄ ${hapticText} ►`, badgeClass: hapticBadge },
       { id: 'controls', title: 'GUÍA / ATAJOS DE TECLADO', val: '[INFO]', badge: 'KEYS' },
       { id: 'fullscreen', title: 'PANTALLA COMPLETA', val: '[ENTER]', badge: 'FULL' },
@@ -650,6 +651,7 @@ export class MenuModal {
       else if (setting === 'frameskip') this.adjustSelection(1);
       else if (setting === 'muteFF') this.adjustSelection(1);
       else if (setting === 'volume') this.adjustSelection(1);
+      else if (setting === 'diag') this.openDiagnosticsModal();
       else if (setting === 'haptic') this.adjustSelection(1);
       else if (setting === 'controls') this.showControlsInfo();
       else if (setting === 'fullscreen') this.toggleFullscreen();
@@ -832,5 +834,146 @@ export class MenuModal {
     } else {
       this.hud.showToast('Usa "Añadir a pantalla de inicio" en tu navegador', '💡');
     }
+  }
+
+  // --- Real-time Audio & Engine Diagnostics Modal ---
+  openDiagnosticsModal() {
+    // Remove any existing diag overlay
+    const existing = document.querySelector('.retro-diag-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'retro-diag-overlay';
+    overlay.innerHTML = `
+      <div class="retro-diag-header">
+        <span>🔧 DIAGNÓSTICO EN VIVO</span>
+        <span class="retro-diag-close" style="cursor:pointer; padding: 2px 6px;">[CERRAR ✕]</span>
+      </div>
+
+      <div class="retro-diag-grid">
+        <div class="retro-diag-card">
+          <div class="retro-diag-card-title">MOTOR CORE</div>
+          <div class="retro-diag-card-val" id="diag-core-name">${this.engine.useMgba ? 'mGBA WASM (C/Native)' : 'Legacy Fallback'}</div>
+        </div>
+        <div class="retro-diag-card">
+          <div class="retro-diag-card-title">ESTADO AUDIO</div>
+          <div class="retro-diag-card-val" id="diag-audio-state">Comprobando...</div>
+        </div>
+        <div class="retro-diag-card">
+          <div class="retro-diag-card-title">PIPELINE / THREAD</div>
+          <div class="retro-diag-card-val" id="diag-audio-mode">Comprobando...</div>
+        </div>
+        <div class="retro-diag-card">
+          <div class="retro-diag-card-title">FRECUENCIAS (HW / GBA)</div>
+          <div class="retro-diag-card-val" id="diag-sample-rate">-- / 32768 Hz</div>
+        </div>
+        <div class="retro-diag-card">
+          <div class="retro-diag-card-title">BÚFER EN COLA</div>
+          <div class="retro-diag-card-val" id="diag-buffer-ms">0 ms (0 smp)</div>
+        </div>
+        <div class="retro-diag-card">
+          <div class="retro-diag-card-title">TRÁFICO MUESTRAS</div>
+          <div class="retro-diag-card-val" id="diag-samples-traffic">0 / seg</div>
+        </div>
+      </div>
+
+      <div class="retro-vu-container">
+        <div class="retro-vu-title">
+          <span>VOLUMEN PICO / ACTIVIDAD PCM:</span>
+          <span id="diag-vu-val">0%</span>
+        </div>
+        <div class="retro-vu-bar-bg">
+          <div class="retro-vu-bar-fill" id="diag-vu-fill"></div>
+        </div>
+      </div>
+
+      <div class="retro-diag-actions">
+        <button class="retro-diag-btn" id="diag-btn-tone">🔊 PROBAR TONO (BIP)</button>
+        <button class="retro-diag-btn" id="diag-btn-unlock">⚡ DESBLOQUEAR AUDIO</button>
+        <button class="retro-diag-btn" id="diag-btn-reset">🔄 REINICIAR DRIVER</button>
+        <button class="retro-diag-btn" id="diag-btn-close">CERRAR</button>
+      </div>
+    `;
+
+    this.menuElement.appendChild(overlay);
+
+    const closeBtn = overlay.querySelector('.retro-diag-close');
+    const closeBtn2 = overlay.querySelector('#diag-btn-close');
+    const toneBtn = overlay.querySelector('#diag-btn-tone');
+    const unlockBtn = overlay.querySelector('#diag-btn-unlock');
+    const resetBtn = overlay.querySelector('#diag-btn-reset');
+
+    const closeDiag = () => {
+      if (this._diagInterval) {
+        clearInterval(this._diagInterval);
+        this._diagInterval = null;
+      }
+      overlay.remove();
+    };
+
+    closeBtn.addEventListener('click', closeDiag);
+    closeBtn2.addEventListener('click', closeDiag);
+
+    toneBtn.addEventListener('click', () => {
+      this.engine.audioDriver.playTestTone();
+      this.hud.showToast('Tono de prueba enviado a la salida de audio', '🔊');
+    });
+
+    unlockBtn.addEventListener('click', async () => {
+      await this.engine.audioDriver.unlockAudio();
+      this.hud.showToast('AudioContext reanudado y desbloqueado', '⚡');
+    });
+
+    resetBtn.addEventListener('click', async () => {
+      await this.engine.audioDriver.resetPipeline();
+      this.hud.showToast('Pipeline de audio reiniciado', '🔄');
+    });
+
+    // Update live metrics 20 times per second
+    const updateStats = () => {
+      if (!overlay.isConnected) {
+        if (this._diagInterval) clearInterval(this._diagInterval);
+        return;
+      }
+
+      const diag = this.engine.audioDriver.getDiagnostics();
+      const stateEl = overlay.querySelector('#diag-audio-state');
+      const modeEl = overlay.querySelector('#diag-audio-mode');
+      const rateEl = overlay.querySelector('#diag-sample-rate');
+      const bufEl = overlay.querySelector('#diag-buffer-ms');
+      const trafficEl = overlay.querySelector('#diag-samples-traffic');
+      const vuFill = overlay.querySelector('#diag-vu-fill');
+      const vuVal = overlay.querySelector('#diag-vu-val');
+
+      if (stateEl) {
+        stateEl.textContent = (diag.contextState || 'Desconocido').toUpperCase();
+        stateEl.className = 'retro-diag-card-val state-' + (diag.contextState === 'running' ? 'running' : 'suspended');
+      }
+
+      if (modeEl) {
+        modeEl.textContent = diag.mode || 'Normal';
+      }
+
+      if (rateEl) {
+        rateEl.textContent = `${diag.hardwareSampleRate || '--'} Hz / ${diag.sourceSampleRate || 32768} Hz`;
+      }
+
+      if (bufEl) {
+        bufEl.textContent = `${diag.bufferMs} ms (${diag.availableSamples} muestras)`;
+      }
+
+      if (trafficEl) {
+        trafficEl.textContent = `${diag.writesPerSec} fps audio (${diag.underruns} cortes)`;
+      }
+
+      if (vuFill && vuVal) {
+        const peakPercent = Math.min(100, Math.round(diag.peakVolume * 100));
+        vuFill.style.width = `${peakPercent}%`;
+        vuVal.textContent = `${peakPercent}%`;
+      }
+    };
+
+    updateStats();
+    this._diagInterval = setInterval(updateStats, 80);
   }
 }

@@ -1,245 +1,585 @@
 /**
- * NekoAdvance - Low-Latency High-Fidelity Audio Driver
+ * NekoAdvance - Ultra-Low-Latency High-Fidelity Audio Driver
  * Features:
- * - Dynamic Ring Buffer to eliminate crackling / stuttering
- * - Web Audio API (44.1kHz / 48kHz Output)
- * - Automatic AudioContext unlock on first user gesture
- * - Master volume control and fast-forward muting
+ * - Dual Engine Architecture: Modern AudioWorklet (Dedicated Audio Thread) + ScriptProcessor Fallback
+ * - GBA Native 32,768 Hz dynamic resampling with sub-sample linear interpolation
+ * - Dynamic Elastic Buffering / Adaptive Clock Drift (eliminates underruns & crackling on mobile)
+ * - Mobile-first AudioContext auto-unlock & lifecycle management (Android Chrome / iOS WebKit)
+ * - Real-time Audio & Hardware Diagnostics with VU Meter integration
  */
 
+// AudioWorklet Processor source code as an embedded string
+const AUDIO_WORKLET_CODE = `
+class NekoAudioProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.ringCapacity = 65536;
+    this.ringBufferL = new Float32Array(this.ringCapacity);
+    this.ringBufferR = new Float32Array(this.ringCapacity);
+    this.writePtr = 0;
+    this.readPtr = 0;
+    this.availableSamples = 0;
+
+    this.sourceSampleRate = 32768; // GBA native audio clock
+    this.resamplePhase = 0;
+    this.volume = 0.8;
+    this.isMuted = false;
+
+    this.underruns = 0;
+    this.samplesWritten = 0;
+    this.samplesRead = 0;
+    this.peakVolume = 0;
+
+    this.port.onmessage = (e) => {
+      const msg = e.data;
+      if (!msg) return;
+
+      if (msg.type === 'samples') {
+        this.writeSamples(msg.samples, msg.isInt16);
+      } else if (msg.type === 'volume') {
+        this.volume = msg.volume;
+      } else if (msg.type === 'mute') {
+        this.isMuted = msg.isMuted;
+      } else if (msg.type === 'sourceRate') {
+        this.sourceSampleRate = msg.rate;
+      } else if (msg.type === 'clear') {
+        this.clear();
+      }
+    };
+  }
+
+  writeSamples(samples, isInt16) {
+    if (!samples || samples.length === 0) return;
+    const count = samples.length >> 1; // Stereo pairs
+    const norm = isInt16 ? (1.0 / 32768.0) : 1.0;
+
+    let peak = 0;
+    for (let i = 0; i < count; i++) {
+      const idx = i << 1;
+      const left = samples[idx] * norm;
+      const right = samples[idx + 1] * norm;
+
+      const absL = Math.abs(left);
+      const absR = Math.abs(right);
+      if (absL > peak) peak = absL;
+      if (absR > peak) peak = absR;
+
+      this.ringBufferL[this.writePtr] = left;
+      this.ringBufferR[this.writePtr] = right;
+      this.writePtr = (this.writePtr + 1) % this.ringCapacity;
+
+      if (this.availableSamples < this.ringCapacity) {
+        this.availableSamples++;
+      } else {
+        // Overflow: advance read pointer
+        this.readPtr = (this.readPtr + 1) % this.ringCapacity;
+      }
+    }
+
+    this.samplesWritten += count;
+    this.peakVolume = peak;
+  }
+
+  clear() {
+    this.writePtr = 0;
+    this.readPtr = 0;
+    this.availableSamples = 0;
+    this.resamplePhase = 0;
+    this.ringBufferL.fill(0);
+    this.ringBufferR.fill(0);
+  }
+
+  process(inputs, outputs, parameters) {
+    const output = outputs[0];
+    if (!output || output.length < 2) return true;
+
+    const outputL = output[0];
+    const outputR = output[1];
+    const length = outputL.length;
+
+    if (this.isMuted || this.volume <= 0.001) {
+      outputL.fill(0);
+      outputR.fill(0);
+      return true;
+    }
+
+    const vol = this.volume;
+    const targetRate = sampleRate; // Global AudioWorklet hardware sampleRate (e.g. 48000 or 44100)
+
+    // Dynamic Elastic Buffering: adjust consumption speed to prevent buffer underrun/overflow
+    let speedAdjustment = 1.0;
+    if (this.availableSamples < 1200) {
+      // Buffer is getting low: slightly decelerate consumption to avoid dropouts
+      speedAdjustment = 0.985;
+    } else if (this.availableSamples > 3500) {
+      // Buffer is getting full: slightly accelerate consumption to reduce latency
+      speedAdjustment = 1.015;
+    }
+
+    const resampleStep = (this.sourceSampleRate / targetRate) * speedAdjustment;
+
+    let currentPeak = 0;
+
+    for (let i = 0; i < length; i++) {
+      if (this.availableSamples >= 2) {
+        const idxA = this.readPtr;
+        const idxB = (this.readPtr + 1) % this.ringCapacity;
+        const frac = this.resamplePhase;
+
+        // High quality sub-sample linear interpolation
+        const left = (this.ringBufferL[idxA] * (1 - frac) + this.ringBufferL[idxB] * frac) * vol;
+        const right = (this.ringBufferR[idxA] * (1 - frac) + this.ringBufferR[idxB] * frac) * vol;
+
+        outputL[i] = left;
+        outputR[i] = right;
+
+        const absL = Math.abs(left);
+        const absR = Math.abs(right);
+        if (absL > currentPeak) currentPeak = absL;
+        if (absR > currentPeak) currentPeak = absR;
+
+        this.resamplePhase += resampleStep;
+        while (this.resamplePhase >= 1.0) {
+          this.resamplePhase -= 1.0;
+          this.readPtr = (this.readPtr + 1) % this.ringCapacity;
+          this.availableSamples--;
+          this.samplesRead++;
+          if (this.availableSamples <= 0) break;
+        }
+      } else {
+        // Buffer starvation
+        outputL[i] = 0;
+        outputR[i] = 0;
+        this.underruns++;
+      }
+    }
+
+    this.peakVolume = currentPeak;
+
+    // Report diagnostics periodically (~10 times per sec)
+    if (Math.random() < 0.05) {
+      this.port.postMessage({
+        type: 'stats',
+        availableSamples: this.availableSamples,
+        underruns: this.underruns,
+        samplesWritten: this.samplesWritten,
+        samplesRead: this.samplesRead,
+        peakVolume: this.peakVolume,
+        speedAdjustment
+      });
+    }
+
+    return true;
+  }
+}
+
+registerProcessor('neko-audio-processor', NekoAudioProcessor);
+`;
+
 export class AudioDriver {
-    constructor(sourceSampleRate = 44100, bufferSize = 2048) {
-        this.sourceSampleRate = sourceSampleRate;
-        this.bufferSize = bufferSize;
-        this.ctx = null;
-        this.node = null;
-        this.volume = 0.8;
-        this.muteOnFastForward = true;
-        this.isMuted = false;
+  constructor(sourceSampleRate = 32768, bufferSize = 2048) {
+    this.sourceSampleRate = sourceSampleRate; // GBA native ~32768 Hz
+    this.bufferSize = bufferSize;
+    this.ctx = null;
+    this.workletNode = null;
+    this.scriptNode = null;
+    this.gainNode = null;
+    this.isWorkletActive = false;
 
-        // Ring Buffer (Circular Queue) for Stereo PCM Samples (Float32)
-        // Capacity: 65536 samples (~1.5 seconds of audio buffer)
-        this.ringCapacity = 65536;
-        this.ringBufferL = new Float32Array(this.ringCapacity);
-        this.ringBufferR = new Float32Array(this.ringCapacity);
-        this.writePtr = 0;
-        this.readPtr = 0;
-        this.availableSamples = 0;
+    this.volume = 0.8;
+    this.muteOnFastForward = true;
+    this.isMuted = false;
 
-        // Fractional resampling index
-        this.resamplePhase = 0;
+    // Fallback Ring Buffer for ScriptProcessor
+    this.ringCapacity = 65536;
+    this.ringBufferL = new Float32Array(this.ringCapacity);
+    this.ringBufferR = new Float32Array(this.ringCapacity);
+    this.writePtr = 0;
+    this.readPtr = 0;
+    this.availableSamples = 0;
+    this.resamplePhase = 0;
 
-        // Diagnostics
-        this.debugTicks = 0;
-        this.debugSamplesWritten = 0;
-        this._loggedNonZero = false;
+    // Diagnostics & VU Meter tracking
+    this.stats = {
+      mode: 'Initializing...',
+      contextState: 'uninitialized',
+      hardwareSampleRate: 0,
+      sourceSampleRate: this.sourceSampleRate,
+      availableSamples: 0,
+      bufferMs: 0,
+      underruns: 0,
+      samplesWritten: 0,
+      samplesRead: 0,
+      peakVolume: 0,
+      speedAdjustment: 1.0,
+      lastWriteTime: 0,
+      writesPerSec: 0
+    };
 
-        // Expose test tone on window
-        window.nekoPlayTestTone = () => this.playTestTone();
-    }
+    this._writeCounter = 0;
+    this._lastFpsTimer = performance.now();
 
-    ensureContext() {
-        if (!this.ctx) {
-            const AudioCtx = window.AudioContext || window.webkitAudioContext;
-            if (!AudioCtx) {
-                console.error('[AudioDriver] Web Audio API is not supported in this browser');
-                return;
-            }
-            try {
-                this.ctx = new AudioCtx({ latencyHint: 'interactive' });
-                console.log('[AudioDriver] AudioContext initialized. Hardware SampleRate:', this.ctx.sampleRate, 'State:', this.ctx.state);
-            } catch (e) {
-                this.ctx = new AudioCtx();
-            }
-            this.setupAudioNode();
-        }
+    // Auto-setup lifecycle listeners
+    this.setupLifecycleListeners();
+  }
 
-        if (this.ctx && this.ctx.state === 'suspended') {
-            this.ctx.resume().then(() => {
-                console.log('[AudioDriver] AudioContext resumed -> state:', this.ctx?.state);
-            }).catch((err) => {
-                console.warn('[AudioDriver] AudioContext resume error:', err);
-            });
-        }
-    }
+  setupLifecycleListeners() {
+    // Resume audio context whenever user interacts or page gains visibility
+    const autoResume = () => this.unlockAudio();
 
-    unlockAudio() {
-        this.ensureContext();
-        if (this.ctx) {
-            if (this.ctx.state !== 'running') {
-                this.ctx.resume().catch(() => {});
-            }
-            // Play a 1-sample silent buffer to reliably unlock hardware audio output on Android & iOS
-            try {
-                const silent = this.ctx.createBuffer(1, 1, 22050);
-                const src = this.ctx.createBufferSource();
-                src.buffer = silent;
-                src.connect(this.ctx.destination);
-                src.start(0);
-            } catch (e) {}
-        }
-    }
+    ['touchstart', 'touchend', 'pointerdown', 'keydown', 'click'].forEach(evt => {
+      window.addEventListener(evt, autoResume, { passive: true, capture: true });
+    });
 
-    setupAudioNode() {
-        if (!this.ctx) return;
-
-        try {
-            // ScriptProcessorNode with 1 input and 2 outputs
-            this.node = this.ctx.createScriptProcessor(this.bufferSize, 1, 2);
-            this.node.onaudioprocess = (e) => this.processAudio(e);
-
-            // Connect a muted dummy oscillator to input 0 so Chromium/Android never suspends the audio pump
-            const osc = this.ctx.createOscillator();
-            const muteGain = this.ctx.createGain();
-            muteGain.gain.setValueAtTime(0, this.ctx.currentTime);
-            osc.connect(muteGain);
-            muteGain.connect(this.node);
-            osc.start(0);
-
-            this.node.connect(this.ctx.destination);
-
-            // Store persistent global references
-            window.__nekoAudioDriverNode = this.node;
-            window.__nekoAudioDriverOsc = osc;
-            console.log('[AudioDriver] Audio output pipeline connected directly to destination with active keepalive pump.');
-        } catch (err) {
-            console.error('[AudioDriver] Error setting up audio pipeline:', err);
-        }
-    }
-
-    playTestTone() {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
         this.unlockAudio();
-        if (!this.ctx) return;
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(440, this.ctx.currentTime); // 440Hz A
-        gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.5);
-        osc.connect(gain);
-        gain.connect(this.ctx.destination);
-        osc.start();
-        osc.stop(this.ctx.currentTime + 0.5);
-        console.log('[AudioDriver] 🔔 Test tone (440Hz) played successfully.');
+      }
+    });
+
+    window.addEventListener('focus', () => {
+      this.unlockAudio();
+    });
+  }
+
+  async ensureContext() {
+    if (!this.ctx) {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) {
+        console.error('[AudioDriver] Web Audio API is not supported in this browser');
+        this.stats.mode = 'Web Audio Unsupported';
+        return;
+      }
+
+      try {
+        this.ctx = new AudioCtx({ latencyHint: 'interactive' });
+      } catch (e) {
+        this.ctx = new AudioCtx();
+      }
+
+      this.stats.hardwareSampleRate = this.ctx.sampleRate;
+      this.stats.contextState = this.ctx.state;
+      console.log(`[AudioDriver] AudioContext created. SampleRate: ${this.ctx.sampleRate} Hz | State: ${this.ctx.state}`);
+
+      await this.initPipeline();
     }
 
-    processAudio(e) {
-        this.debugTicks++;
-        const outputL = e.outputBuffer.getChannelData(0);
-        const outputR = e.outputBuffer.getChannelData(1);
-        const length = outputL.length;
+    if (this.ctx && (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted')) {
+      try {
+        await this.ctx.resume();
+        this.stats.contextState = this.ctx.state;
+        console.log('[AudioDriver] AudioContext resumed successfully -> state:', this.ctx.state);
+      } catch (err) {
+        console.warn('[AudioDriver] AudioContext resume error:', err);
+      }
+    }
+  }
 
-        if (this.isMuted || this.volume <= 0.001) {
-            outputL.fill(0);
-            outputR.fill(0);
-            return;
-        }
+  async unlockAudio() {
+    await this.ensureContext();
+    if (this.ctx) {
+      if (this.ctx.state === 'suspended') {
+        this.ctx.resume().catch(() => {});
+      }
+      this.stats.contextState = this.ctx.state;
 
-        const vol = this.volume;
+      // Play a 1-sample silent buffer to reliably unlock hardware audio output on Android & iOS
+      try {
+        const silent = this.ctx.createBuffer(1, 1, 22050);
+        const src = this.ctx.createBufferSource();
+        src.buffer = silent;
+        src.connect(this.ctx.destination);
+        src.start(0);
+      } catch (e) {}
+    }
+  }
 
-        // Resample ratio: mGBA output rate (44100) / Hardware device sample rate (e.g. 48000)
-        const targetRate = this.ctx ? this.ctx.sampleRate : this.sourceSampleRate;
-        const resampleStep = this.sourceSampleRate / targetRate;
+  async initPipeline() {
+    if (!this.ctx) return;
 
-        let maxOut = 0;
+    // Master Gain Node
+    this.gainNode = this.ctx.createGain();
+    this.gainNode.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
+    this.gainNode.connect(this.ctx.destination);
 
-        for (let i = 0; i < length; i++) {
-            if (this.availableSamples >= 2) {
-                const idxA = this.readPtr;
-                const idxB = (this.readPtr + 1) % this.ringCapacity;
-                const frac = this.resamplePhase;
+    // Try AudioWorklet first (Modern, glitch-free audio thread)
+    let workletSuccess = false;
+    if (typeof AudioWorkletNode !== 'undefined' && this.ctx.audioWorklet) {
+      try {
+        const blob = new Blob([AUDIO_WORKLET_CODE], { type: 'application/javascript' });
+        const blobUrl = URL.createObjectURL(blob);
+        await this.ctx.audioWorklet.addModule(blobUrl);
+        URL.revokeObjectURL(blobUrl);
 
-                // Linear interpolation for crystal clear sound without pitch artifacts
-                const left = (this.ringBufferL[idxA] * (1 - frac) + this.ringBufferL[idxB] * frac) * vol;
-                const right = (this.ringBufferR[idxA] * (1 - frac) + this.ringBufferR[idxB] * frac) * vol;
+        this.workletNode = new AudioWorkletNode(this.ctx, 'neko-audio-processor', {
+          numberOfInputs: 0,
+          numberOfOutputs: 1,
+          outputChannelCount: [2]
+        });
 
-                outputL[i] = left;
-                outputR[i] = right;
+        this.workletNode.port.onmessage = (e) => {
+          if (e.data && e.data.type === 'stats') {
+            this.stats.availableSamples = e.data.availableSamples;
+            this.stats.underruns = e.data.underruns;
+            this.stats.samplesWritten = e.data.samplesWritten;
+            this.stats.samplesRead = e.data.samplesRead;
+            this.stats.peakVolume = e.data.peakVolume;
+            this.stats.speedAdjustment = e.data.speedAdjustment;
+            this.stats.bufferMs = Math.round((e.data.availableSamples / this.sourceSampleRate) * 1000);
+          }
+        };
 
-                if (Math.abs(left) > maxOut) maxOut = Math.abs(left);
-
-                this.resamplePhase += resampleStep;
-                while (this.resamplePhase >= 1.0) {
-                    this.resamplePhase -= 1.0;
-                    this.readPtr = (this.readPtr + 1) % this.ringCapacity;
-                    this.availableSamples--;
-                    if (this.availableSamples <= 0) break;
-                }
-            } else {
-                // Buffer Underrun: soft silence
-                outputL[i] = 0;
-                outputR[i] = 0;
-            }
-        }
-
-        if (this.debugTicks === 60 || this.debugTicks === 240) {
-            console.log('[AudioDriver] Audio Process Tick #' + this.debugTicks + ' | RingBuffer queue:', this.availableSamples, '| MaxOut Amplitude:', maxOut.toFixed(4), '| Vol:', vol);
-        }
+        this.workletNode.connect(this.gainNode);
+        this.isWorkletActive = true;
+        this.stats.mode = 'AudioWorklet (Dedicated Audio Thread)';
+        console.log('[AudioDriver] 🚀 AudioWorklet pipeline initialized successfully.');
+        workletSuccess = true;
+      } catch (err) {
+        console.warn('[AudioDriver] AudioWorklet init failed, falling back to ScriptProcessor:', err);
+      }
     }
 
-    /**
-     * Push interleaved stereo PCM samples (L, R, L, R...) into Ring Buffer
-     * @param {Float32Array|Int16Array} samples 
-     */
-    writeSamples(samples) {
-        if (!samples || samples.length === 0) return;
+    // Fallback to resilient ScriptProcessorNode if AudioWorklet unavailable
+    if (!workletSuccess) {
+      try {
+        // Standard generator node: 0 inputs, 2 outputs
+        this.scriptNode = this.ctx.createScriptProcessor(this.bufferSize, 0, 2);
+        this.scriptNode.onaudioprocess = (e) => this.processScriptAudio(e);
+        this.scriptNode.connect(this.gainNode);
+        this.isWorkletActive = false;
+        this.stats.mode = 'ScriptProcessor (Direct WebAudio Fallback)';
+        console.log('[AudioDriver] ⚙️ ScriptProcessor pipeline initialized.');
+      } catch (err) {
+        console.error('[AudioDriver] Failed to create audio processor:', err);
+        this.stats.mode = 'Pipeline Error';
+      }
+    }
+  }
 
-        // Auto-resume if suspended
-        if (this.ctx && this.ctx.state === 'suspended') {
-            this.ctx.resume().catch(() => {});
-        }
+  /**
+   * Push interleaved stereo PCM samples (L, R, L, R...) into Audio Pipeline
+   * @param {Float32Array|Int16Array} samples 
+   */
+  writeSamples(samples) {
+    if (!samples || samples.length === 0) return;
 
-        let nonZeroCount = 0;
-        let maxVal = 0;
-        for (let i = 0; i < samples.length; i++) {
-            const val = Math.abs(samples[i]);
-            if (val > 0) nonZeroCount++;
-            if (val > maxVal) maxVal = val;
-        }
+    this.stats.lastWriteTime = performance.now();
+    this._writeCounter++;
 
-        if (nonZeroCount > 0 && !this._loggedNonZero) {
-            this._loggedNonZero = true;
-            console.log('[AudioDriver] 🔊 NON-ZERO GBA AUDIO DETECTED! Sample Count:', samples.length, '| Max Value:', maxVal, '(PCM range: 0-32767)');
-        }
-
-        this.debugSamplesWritten += samples.length;
-
-        const count = samples.length >> 1; // Number of stereo pairs
-        const isInt16 = samples instanceof Int16Array;
-        const normFactor = 1.0 / 32768.0;
-
-        for (let i = 0; i < count; i++) {
-            const idx = i << 1;
-            const left = isInt16 ? samples[idx] * normFactor : samples[idx];
-            const right = isInt16 ? samples[idx + 1] * normFactor : samples[idx + 1];
-
-            this.ringBufferL[this.writePtr] = left;
-            this.ringBufferR[this.writePtr] = right;
-            this.writePtr = (this.writePtr + 1) % this.ringCapacity;
-
-            if (this.availableSamples < this.ringCapacity) {
-                this.availableSamples++;
-            } else {
-                // Overflow: advance read pointer to drop oldest sample
-                this.readPtr = (this.readPtr + 1) % this.ringCapacity;
-            }
-        }
+    const now = performance.now();
+    if (now - this._lastFpsTimer >= 1000) {
+      this.stats.writesPerSec = this._writeCounter;
+      this._writeCounter = 0;
+      this._lastFpsTimer = now;
+      if (this.ctx) this.stats.contextState = this.ctx.state;
     }
 
-    setVolume(val) {
-        this.volume = Math.max(0, Math.min(1, val));
+    if (this.isWorkletActive && this.workletNode) {
+      const isInt16 = samples instanceof Int16Array;
+      this.workletNode.port.postMessage({
+        type: 'samples',
+        samples: samples,
+        isInt16: isInt16
+      });
+      return;
     }
 
-    setMute(mute) {
-        this.isMuted = !!mute;
+    // ScriptProcessor Ring Buffer Push
+    const count = samples.length >> 1;
+    const isInt16 = samples instanceof Int16Array;
+    const norm = isInt16 ? (1.0 / 32768.0) : 1.0;
+
+    let peak = 0;
+    for (let i = 0; i < count; i++) {
+      const idx = i << 1;
+      const left = samples[idx] * norm;
+      const right = samples[idx + 1] * norm;
+
+      const absL = Math.abs(left);
+      const absR = Math.abs(right);
+      if (absL > peak) peak = absL;
+      if (absR > peak) peak = absR;
+
+      this.ringBufferL[this.writePtr] = left;
+      this.ringBufferR[this.writePtr] = right;
+      this.writePtr = (this.writePtr + 1) % this.ringCapacity;
+
+      if (this.availableSamples < this.ringCapacity) {
+        this.availableSamples++;
+      } else {
+        this.readPtr = (this.readPtr + 1) % this.ringCapacity;
+      }
     }
 
-    clear() {
-        this.writePtr = 0;
-        this.readPtr = 0;
-        this.availableSamples = 0;
-        this.resamplePhase = 0;
-        this.ringBufferL.fill(0);
-        this.ringBufferR.fill(0);
+    this.stats.samplesWritten += count;
+    this.stats.peakVolume = peak;
+    this.stats.availableSamples = this.availableSamples;
+    this.stats.bufferMs = Math.round((this.availableSamples / this.sourceSampleRate) * 1000);
+  }
+
+  processScriptAudio(e) {
+    const outputL = e.outputBuffer.getChannelData(0);
+    const outputR = e.outputBuffer.getChannelData(1);
+    const length = outputL.length;
+
+    if (this.isMuted || this.volume <= 0.001) {
+      outputL.fill(0);
+      outputR.fill(0);
+      return;
     }
+
+    const vol = this.volume;
+    const targetRate = this.ctx ? this.ctx.sampleRate : this.sourceSampleRate;
+
+    // Dynamic Elastic Buffering
+    let speedAdjustment = 1.0;
+    if (this.availableSamples < 1200) {
+      speedAdjustment = 0.985;
+    } else if (this.availableSamples > 3500) {
+      speedAdjustment = 1.015;
+    }
+
+    const resampleStep = (this.sourceSampleRate / targetRate) * speedAdjustment;
+    let currentPeak = 0;
+
+    for (let i = 0; i < length; i++) {
+      if (this.availableSamples >= 2) {
+        const idxA = this.readPtr;
+        const idxB = (this.readPtr + 1) % this.ringCapacity;
+        const frac = this.resamplePhase;
+
+        const left = (this.ringBufferL[idxA] * (1 - frac) + this.ringBufferL[idxB] * frac) * vol;
+        const right = (this.ringBufferR[idxA] * (1 - frac) + this.ringBufferR[idxB] * frac) * vol;
+
+        outputL[i] = left;
+        outputR[i] = right;
+
+        const absL = Math.abs(left);
+        const absR = Math.abs(right);
+        if (absL > currentPeak) currentPeak = absL;
+        if (absR > currentPeak) currentPeak = absR;
+
+        this.resamplePhase += resampleStep;
+        while (this.resamplePhase >= 1.0) {
+          this.resamplePhase -= 1.0;
+          this.readPtr = (this.readPtr + 1) % this.ringCapacity;
+          this.availableSamples--;
+          this.stats.samplesRead++;
+          if (this.availableSamples <= 0) break;
+        }
+      } else {
+        outputL[i] = 0;
+        outputR[i] = 0;
+        this.stats.underruns++;
+      }
+    }
+
+    this.stats.peakVolume = currentPeak;
+    this.stats.availableSamples = this.availableSamples;
+    this.stats.bufferMs = Math.round((this.availableSamples / this.sourceSampleRate) * 1000);
+    this.stats.speedAdjustment = speedAdjustment;
+  }
+
+  setVolume(val) {
+    this.volume = Math.max(0, Math.min(1, val));
+    if (this.gainNode && this.ctx) {
+      this.gainNode.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
+    }
+    if (this.isWorkletActive && this.workletNode) {
+      this.workletNode.port.postMessage({ type: 'volume', volume: this.volume });
+    }
+  }
+
+  setMute(mute) {
+    this.isMuted = !!mute;
+    if (this.gainNode && this.ctx) {
+      this.gainNode.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
+    }
+    if (this.isWorkletActive && this.workletNode) {
+      this.workletNode.port.postMessage({ type: 'mute', isMuted: this.isMuted });
+    }
+  }
+
+  setSourceSampleRate(rate) {
+    if (rate && rate > 0) {
+      this.sourceSampleRate = rate;
+      this.stats.sourceSampleRate = rate;
+      if (this.isWorkletActive && this.workletNode) {
+        this.workletNode.port.postMessage({ type: 'sourceRate', rate });
+      }
+    }
+  }
+
+  clear() {
+    this.writePtr = 0;
+    this.readPtr = 0;
+    this.availableSamples = 0;
+    this.resamplePhase = 0;
+    this.ringBufferL.fill(0);
+    this.ringBufferR.fill(0);
+    if (this.isWorkletActive && this.workletNode) {
+      this.workletNode.port.postMessage({ type: 'clear' });
+    }
+  }
+
+  async resetPipeline() {
+    console.log('[AudioDriver] Resetting audio pipeline...');
+    try {
+      if (this.scriptNode) {
+        this.scriptNode.disconnect();
+        this.scriptNode = null;
+      }
+      if (this.workletNode) {
+        this.workletNode.disconnect();
+        this.workletNode = null;
+      }
+      if (this.gainNode) {
+        this.gainNode.disconnect();
+        this.gainNode = null;
+      }
+      if (this.ctx) {
+        await this.ctx.close().catch(() => {});
+        this.ctx = null;
+      }
+    } catch (e) {}
+
+    await this.ensureContext();
+    await this.unlockAudio();
+    return true;
+  }
+
+  playTestTone() {
+    this.unlockAudio();
+    if (!this.ctx) return;
+    try {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const now = this.ctx.currentTime;
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, now); // D5
+      osc.frequency.exponentialRampToValueAtTime(880, now + 0.15); // A5
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.35);
+      console.log('[AudioDriver] 🔔 Test chime played successfully.');
+    } catch (e) {
+      console.error('[AudioDriver] Error playing test tone:', e);
+    }
+  }
+
+  getDiagnostics() {
+    if (this.ctx) {
+      this.stats.contextState = this.ctx.state;
+      this.stats.hardwareSampleRate = this.ctx.sampleRate;
+    }
+    return {
+      ...this.stats,
+      isMuted: this.isMuted,
+      volume: this.volume,
+      muteOnFastForward: this.muteOnFastForward
+    };
+  }
 }

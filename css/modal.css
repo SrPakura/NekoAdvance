@@ -320,3 +320,131 @@
   border: 1px solid #4e3a75;
   margin-right: 2px;
 }
+
+/* --- Live Audio & Engine Diagnostics Modal Overlay --- */
+.retro-diag-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 6, 20, 0.95);
+  z-index: 50;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.62rem;
+  color: #f1f5f9;
+  overflow-y: auto;
+}
+
+.retro-diag-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #4e3a75;
+  padding-bottom: 4px;
+  margin-bottom: 6px;
+  font-family: var(--font-retro), monospace;
+  font-size: 0.58rem;
+  color: #00f0ff;
+}
+
+.retro-diag-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.retro-diag-card {
+  background: rgba(25, 18, 40, 0.85);
+  border: 1px solid #3d2f5a;
+  border-radius: 3px;
+  padding: 4px 6px;
+}
+
+.retro-diag-card-title {
+  color: #a78bfa;
+  font-size: 0.52rem;
+  font-weight: bold;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+.retro-diag-card-val {
+  color: #38bdf8;
+  font-size: 0.65rem;
+  font-weight: 700;
+  word-break: break-all;
+}
+
+.retro-diag-card-val.state-running {
+  color: #4ade80;
+}
+.retro-diag-card-val.state-suspended {
+  color: #fbbf24;
+}
+.retro-diag-card-val.state-error {
+  color: #f87171;
+}
+
+/* Live VU Meter */
+.retro-vu-container {
+  background: rgba(25, 18, 40, 0.85);
+  border: 1px solid #3d2f5a;
+  border-radius: 3px;
+  padding: 6px;
+  margin-bottom: 6px;
+}
+
+.retro-vu-title {
+  color: #a78bfa;
+  font-size: 0.52rem;
+  font-weight: bold;
+  margin-bottom: 4px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.retro-vu-bar-bg {
+  width: 100%;
+  height: 8px;
+  background: #110c1c;
+  border: 1px solid #3d2f5a;
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+
+.retro-vu-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #4ade80 0%, #fbbf24 70%, #ef4444 100%);
+  transition: width 0.05s ease-out;
+}
+
+.retro-diag-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-top: auto;
+}
+
+.retro-diag-btn {
+  background: #2b1f44;
+  border: 1px solid #00f0ff;
+  color: #ffffff;
+  font-family: var(--font-retro), monospace;
+  font-size: 0.5rem;
+  padding: 5px 4px;
+  border-radius: 2px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.1s ease;
+}
+
+.retro-diag-btn:active {
+  background: #00f0ff;
+  color: #000000;
+}
+
