@@ -1,6 +1,6 @@
 // NekoAdvance Rolling-Release Service Worker
 // Automatically checks for updates, auto-activates in the background, and serves freshest content.
-const CACHE_NAME = 'nekoadvance-rolling-v28';
+const CACHE_NAME = 'nekoadvance-rolling-v29';
 
 const ASSETS_TO_CACHE = [
   './',
