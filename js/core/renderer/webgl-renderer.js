@@ -11,8 +11,8 @@
 
 // Universal Fullscreen Quad Vertex Shader
 const VERTEX_SHADER_SOURCE = `#version 300 es
-in vec2 a_position;
-in vec2 a_texCoord;
+layout(location = 0) in vec2 a_position;
+layout(location = 1) in vec2 a_texCoord;
 out vec2 v_texCoord;
 
 void main() {
@@ -34,15 +34,15 @@ uniform bool u_colorCorrection;
 vec3 correctGBAColor(vec3 color) {
     if (!u_colorCorrection) return color;
     // Accurate GBA color balance curve
-    float r = color.r * 0.84 + color.g * 0.14 + color.b * 0.02;
-    float g = color.r * 0.04 + color.g * 0.88 + color.b * 0.08;
-    float b = color.r * 0.02 + color.g * 0.16 + color.b * 0.82;
+    float r = max(color.r * 0.84 + color.g * 0.14 + color.b * 0.02, 0.0);
+    float g = max(color.r * 0.04 + color.g * 0.88 + color.b * 0.08, 0.0);
+    float b = max(color.r * 0.02 + color.g * 0.16 + color.b * 0.82, 0.0);
     return clamp(vec3(pow(r, 0.95), pow(g, 0.95), pow(b, 0.95)), 0.0, 1.0);
 }
 
 void main() {
     vec4 tex = texture(u_texture, v_texCoord);
-    fragColor = vec4(correctGBAColor(tex.rgb), tex.a);
+    fragColor = vec4(correctGBAColor(tex.rgb), 1.0);
 }
 `;
 
@@ -58,9 +58,9 @@ uniform bool u_colorCorrection;
 
 vec3 correctGBAColor(vec3 color) {
     if (!u_colorCorrection) return color;
-    float r = color.r * 0.84 + color.g * 0.14 + color.b * 0.02;
-    float g = color.r * 0.04 + color.g * 0.88 + color.b * 0.08;
-    float b = color.r * 0.02 + color.g * 0.16 + color.b * 0.82;
+    float r = max(color.r * 0.84 + color.g * 0.14 + color.b * 0.02, 0.0);
+    float g = max(color.r * 0.04 + color.g * 0.88 + color.b * 0.08, 0.0);
+    float b = max(color.r * 0.02 + color.g * 0.16 + color.b * 0.82, 0.0);
     return clamp(vec3(pow(r, 0.95), pow(g, 0.95), pow(b, 0.95)), 0.0, 1.0);
 }
 
@@ -91,7 +91,7 @@ void main() {
     }
 
     vec3 finalColor = col * gridMask * subpixelMask;
-    fragColor = vec4(clamp(finalColor, 0.0, 1.0), baseColor.a);
+    fragColor = vec4(clamp(finalColor, 0.0, 1.0), 1.0);
 }
 `;
 
@@ -107,9 +107,9 @@ uniform bool u_colorCorrection;
 
 vec3 correctGBAColor(vec3 color) {
     if (!u_colorCorrection) return color;
-    float r = color.r * 0.84 + color.g * 0.14 + color.b * 0.02;
-    float g = color.r * 0.04 + color.g * 0.88 + color.b * 0.08;
-    float b = color.r * 0.02 + color.g * 0.16 + color.b * 0.82;
+    float r = max(color.r * 0.84 + color.g * 0.14 + color.b * 0.02, 0.0);
+    float g = max(color.r * 0.04 + color.g * 0.88 + color.b * 0.08, 0.0);
+    float b = max(color.r * 0.02 + color.g * 0.16 + color.b * 0.82, 0.0);
     return clamp(vec3(pow(r, 0.95), pow(g, 0.95), pow(b, 0.95)), 0.0, 1.0);
 }
 
@@ -125,7 +125,7 @@ void main() {
     vec2 uv = v_texCoord - vec2(0.5);
     float vignette = 1.0 - dot(uv, uv) * 0.25;
 
-    fragColor = vec4(clamp(col * vignette, 0.0, 1.0), tex.a);
+    fragColor = vec4(clamp(col * vignette, 0.0, 1.0), 1.0);
 }
 `;
 
@@ -140,15 +140,15 @@ uniform bool u_colorCorrection;
 
 vec3 correctGBAColor(vec3 color) {
     if (!u_colorCorrection) return color;
-    float r = color.r * 0.84 + color.g * 0.14 + color.b * 0.02;
-    float g = color.r * 0.04 + color.g * 0.88 + color.b * 0.08;
-    float b = color.r * 0.02 + color.g * 0.16 + color.b * 0.82;
+    float r = max(color.r * 0.84 + color.g * 0.14 + color.b * 0.02, 0.0);
+    float g = max(color.r * 0.04 + color.g * 0.88 + color.b * 0.08, 0.0);
+    float b = max(color.r * 0.02 + color.g * 0.16 + color.b * 0.82, 0.0);
     return clamp(vec3(pow(r, 0.95), pow(g, 0.95), pow(b, 0.95)), 0.0, 1.0);
 }
 
 void main() {
     vec4 tex = texture(u_texture, v_texCoord);
-    fragColor = vec4(correctGBAColor(tex.rgb), tex.a);
+    fragColor = vec4(correctGBAColor(tex.rgb), 1.0);
 }
 `;
 
@@ -209,6 +209,14 @@ export class WebGLRenderer {
         gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
         gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
 
+        // Configure attribute pointers (0: a_position, 1: a_texCoord)
+        gl.enableVertexAttribArray(0);
+        gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 16, 0);
+        gl.enableVertexAttribArray(1);
+        gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 16, 8);
+
+        if (this.vao) gl.bindVertexArray(null);
+
         // Compile all Shader Programs
         this.programs['pixel-perfect'] = this.compileProgram(VERTEX_SHADER_SOURCE, FRAG_PIXEL_PERFECT);
         this.programs['gba-lcd'] = this.compileProgram(VERTEX_SHADER_SOURCE, FRAG_GBA_LCD);
@@ -265,6 +273,11 @@ export class WebGLRenderer {
         const program = gl.createProgram();
         gl.attachShader(program, vert);
         gl.attachShader(program, frag);
+
+        // Explicitly bind attribute locations
+        gl.bindAttribLocation(program, 0, 'a_position');
+        gl.bindAttribLocation(program, 1, 'a_texCoord');
+
         gl.linkProgram(program);
 
         if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
@@ -277,8 +290,8 @@ export class WebGLRenderer {
         return {
             program,
             attribs: {
-                position: gl.getAttribLocation(program, 'a_position'),
-                texCoord: gl.getAttribLocation(program, 'a_texCoord')
+                position: 0,
+                texCoord: 1
             },
             uniforms: {
                 texture: gl.getUniformLocation(program, 'u_texture'),
@@ -356,10 +369,10 @@ export class WebGLRenderer {
             gl.bindVertexArray(this.vao);
         } else {
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
-            gl.enableVertexAttribArray(p.attribs.position);
-            gl.vertexAttribPointer(p.attribs.position, 2, gl.FLOAT, false, 16, 0);
-            gl.enableVertexAttribArray(p.attribs.texCoord);
-            gl.vertexAttribPointer(p.attribs.texCoord, 2, gl.FLOAT, false, 16, 8);
+            gl.enableVertexAttribArray(0);
+            gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 16, 0);
+            gl.enableVertexAttribArray(1);
+            gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 16, 8);
         }
 
         // Set uniforms

@@ -202,8 +202,8 @@ export class GBAEngine {
             if (buf) this.pixelBuffer = buf;
           } else if (this.gba) {
             this.gba.advanceFrame();
-            if (this.gba.video && this.gba.video.softwareRenderer && this.gba.video.softwareRenderer.bufferedData) {
-              this.pixelBuffer = this.gba.video.softwareRenderer.bufferedData;
+            if (this.gba.video && this.gba.video.renderPath && this.gba.video.renderPath.pixelData) {
+              this.pixelBuffer = this.gba.video.renderPath.pixelData.data;
             }
           }
 
