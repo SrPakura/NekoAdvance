@@ -52,10 +52,10 @@ class NekoAdvanceApp {
     // Global User Interaction Listener to Unlock AudioContext
     const unlockAudio = () => {
       if (this.engine && this.engine.audioDriver) {
-        this.engine.audioDriver.ensureContext();
+        this.engine.audioDriver.unlockAudio();
       }
     };
-    ['pointerdown', 'keydown', 'touchstart', 'click'].forEach(evt => {
+    ['pointerdown', 'keydown', 'touchstart', 'touchend', 'click'].forEach(evt => {
       window.addEventListener(evt, unlockAudio, { passive: true, capture: true });
     });
 

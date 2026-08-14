@@ -63,6 +63,23 @@ export class AudioDriver {
         }
     }
 
+    unlockAudio() {
+        this.ensureContext();
+        if (this.ctx) {
+            if (this.ctx.state !== 'running') {
+                this.ctx.resume().catch(() => {});
+            }
+            // Play a 1-sample silent buffer to reliably unlock hardware audio output on Android & iOS
+            try {
+                const silent = this.ctx.createBuffer(1, 1, 22050);
+                const src = this.ctx.createBufferSource();
+                src.buffer = silent;
+                src.connect(this.ctx.destination);
+                src.start(0);
+            } catch (e) {}
+        }
+    }
+
     setupAudioNode() {
         if (!this.ctx) return;
 
@@ -81,7 +98,7 @@ export class AudioDriver {
     }
 
     playTestTone() {
-        this.ensureContext();
+        this.unlockAudio();
         if (!this.ctx) return;
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();

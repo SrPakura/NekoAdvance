@@ -49,7 +49,7 @@ export class InputManager {
   setupKeyboardListeners() {
     window.addEventListener('keydown', (e) => {
       if (this.engine && this.engine.audioDriver) {
-        this.engine.audioDriver.ensureContext();
+        this.engine.audioDriver.unlockAudio();
       }
 
       // Avoid handling keys when typing in an input/textarea
@@ -158,7 +158,7 @@ export class InputManager {
       e.stopPropagation();
 
       if (this.engine && this.engine.audioDriver) {
-        this.engine.audioDriver.ensureContext();
+        this.engine.audioDriver.unlockAudio();
       }
 
       if (this.menuHandler && this.menuHandler.isOpen) {
