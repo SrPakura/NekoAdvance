@@ -9,7 +9,6 @@ import { ConsoleView } from './ui/console-view.js';
 import { MenuModal } from './ui/menu-modal.js';
 import { HUD } from './ui/hud.js';
 import { storage } from './core/storage.js';
-import { debugLogger } from './ui/debug-logger.js';
 
 class NekoAdvanceApp {
   constructor() {
@@ -18,7 +17,6 @@ class NekoAdvanceApp {
     this.fileInput = document.getElementById('rom-file-input');
 
     this.engine = new GBAEngine(this.canvas);
-    debugLogger.setEngine(this.engine);
     this.hud = new HUD();
     
     this.inputManager = new InputManager(this.engine, () => this.toggleMenu());

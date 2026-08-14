@@ -143,36 +143,11 @@ export class MGBABridge {
         if (this.module && typeof this.module._mgba_get_audio_buffer === 'function') {
             const audioPtr = this.module._mgba_get_audio_buffer();
             const count = this.module._mgba_get_audio_samples_count ? this.module._mgba_get_audio_samples_count() : 0;
-            
-            if (this._audioDebugCount === undefined) this._audioDebugCount = 0;
-            this._audioDebugCount++;
-
-            if (this._audioDebugCount <= 10 || this._audioDebugCount % 120 === 0) {
-                console.log(`[MGBABridge] getAudioSamples tick #${this._audioDebugCount} | audioPtr: ${audioPtr} | count: ${count} | HEAP16: ${!!this.module.HEAP16}`);
-            }
 
             if (audioPtr && count > 0 && this.module.HEAP16) {
                 const elemOffset = audioPtr >> 1;
                 const totalSamples = count * 2;
-                const samples = this.module.HEAP16.slice(elemOffset, elemOffset + totalSamples);
-
-                let maxVal = 0;
-                for (let i = 0; i < samples.length; i++) {
-                    const abs = Math.abs(samples[i]);
-                    if (abs > maxVal) maxVal = abs;
-                }
-
-                if (this._audioDebugCount <= 10 || this._audioDebugCount % 120 === 0 || (maxVal > 0 && !this._loggedPositive)) {
-                    this._loggedPositive = true;
-                    console.log(`[MGBABridge] 🔊 PCM Samples: count=${count} | PeakInt16=${maxVal} | First6=${Array.from(samples.subarray(0, 6))}`);
-                }
-
-                return samples;
-            }
-        } else {
-            if (!this._loggedMissingFunc) {
-                this._loggedMissingFunc = true;
-                console.error('[MGBABridge] _mgba_get_audio_buffer function is NOT defined in module!', this.module);
+                return this.module.HEAP16.slice(elemOffset, elemOffset + totalSamples);
             }
         }
         return null;
