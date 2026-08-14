@@ -162,9 +162,9 @@ export class MGBABridge {
                     if (abs > maxVal) maxVal = abs;
                 }
 
-                if (this._audioDebugCount <= 10 || (maxVal > 0 && !this._loggedPositive)) {
+                if (this._audioDebugCount <= 10 || this._audioDebugCount % 120 === 0 || (maxVal > 0 && !this._loggedPositive)) {
                     this._loggedPositive = true;
-                    console.log(`[MGBABridge] 🔊 PCM Buffer Samples: ${samples.length} items (${count} stereo pairs) | Peak Int16: ${maxVal}`);
+                    console.log(`[MGBABridge] 🔊 PCM Samples: count=${count} | PeakInt16=${maxVal} | First6=${Array.from(samples.subarray(0, 6))}`);
                 }
 
                 return samples;

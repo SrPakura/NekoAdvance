@@ -98,15 +98,15 @@ class NekoAudioProcessor extends AudioWorkletProcessor {
 
   process(inputs, outputs, parameters) {
     const output = outputs[0];
-    if (!output || output.length < 2) return true;
+    if (!output || output.length === 0) return true;
 
     const outputL = output[0];
-    const outputR = output[1];
+    const outputR = output.length > 1 ? output[1] : output[0];
     const length = outputL.length;
 
     if (this.isMuted || this.volume <= 0.001) {
       outputL.fill(0);
-      outputR.fill(0);
+      if (output.length > 1) outputR.fill(0);
       return true;
     }
 
