@@ -395,20 +395,10 @@ export class AudioDriver {
     }
 
     // ScriptProcessor Ring Buffer Push
-    const count = samples.length >> 1;
-    const isInt16 = samples instanceof Int16Array;
-    const norm = isInt16 ? (1.0 / 32768.0) : 1.0;
-
-    let peak = 0;
     for (let i = 0; i < count; i++) {
       const idx = i << 1;
       const left = samples[idx] * norm;
       const right = samples[idx + 1] * norm;
-
-      const absL = Math.abs(left);
-      const absR = Math.abs(right);
-      if (absL > peak) peak = absL;
-      if (absR > peak) peak = absR;
 
       this.ringBufferL[this.writePtr] = left;
       this.ringBufferR[this.writePtr] = right;
