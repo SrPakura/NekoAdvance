@@ -64,37 +64,3 @@
   opacity: 1;
   transform: scale(1);
 }
-
-/* Power LED Status Indicator */
-.hud-bar {
-  position: absolute;
-  top: 15px;
-  left: 25px;
-  display: flex;
-  align-items: center;
-  z-index: 100;
-  background: rgba(28, 22, 42, 0.6);
-  backdrop-filter: blur(6px);
-  padding: 6px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.power-led {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #34d399;
-  box-shadow: 0 0 8px #34d399;
-  transition: background 0.3s ease;
-}
-
-.power-led.busy {
-  background: #fbbf24;
-  box-shadow: 0 0 8px #fbbf24;
-}
-
-.power-led.off {
-  background: #64748b;
-  box-shadow: none;
-}

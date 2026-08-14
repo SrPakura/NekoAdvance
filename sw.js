@@ -1,6 +1,6 @@
 // NekoAdvance Rolling-Release Service Worker
 // Automatically checks for updates, auto-activates in the background, and serves freshest content.
-const CACHE_NAME = 'nekoadvance-rolling-v19';
+const CACHE_NAME = 'nekoadvance-rolling-v20';
 
 const ASSETS_TO_CACHE = [
   './',
@@ -36,6 +36,9 @@ const ASSETS_TO_CACHE = [
   './js/ui/menu-modal.js',
   './js/ui/hud.js',
   './assets/icons/icon.svg',
+  './assets/icons/icon-192.png',
+  './assets/icons/icon-512.png',
+  './assets/icons/apple-touch-icon.png',
   './icon_neko.svg',
   './UI/Neko.svg'
 ];
