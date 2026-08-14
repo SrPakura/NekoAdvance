@@ -145,14 +145,34 @@ export class MGBABridge {
             const count = this.module._mgba_get_audio_samples_count ? this.module._mgba_get_audio_samples_count() : 0;
             
             if (this._audioDebugCount === undefined) this._audioDebugCount = 0;
-            if (this._audioDebugCount++ < 5) {
-                console.log('[MGBABridge] Audio Frame #' + this._audioDebugCount + ' | audioPtr:', audioPtr, '| count:', count, '| HEAP16:', !!this.module.HEAP16);
+            this._audioDebugCount++;
+
+            if (this._audioDebugCount <= 10 || this._audioDebugCount % 120 === 0) {
+                console.log(`[MGBABridge] getAudioSamples tick #${this._audioDebugCount} | audioPtr: ${audioPtr} | count: ${count} | HEAP16: ${!!this.module.HEAP16}`);
             }
 
             if (audioPtr && count > 0 && this.module.HEAP16) {
                 const elemOffset = audioPtr >> 1;
                 const totalSamples = count * 2;
-                return this.module.HEAP16.slice(elemOffset, elemOffset + totalSamples);
+                const samples = this.module.HEAP16.slice(elemOffset, elemOffset + totalSamples);
+
+                let maxVal = 0;
+                for (let i = 0; i < samples.length; i++) {
+                    const abs = Math.abs(samples[i]);
+                    if (abs > maxVal) maxVal = abs;
+                }
+
+                if (this._audioDebugCount <= 10 || (maxVal > 0 && !this._loggedPositive)) {
+                    this._loggedPositive = true;
+                    console.log(`[MGBABridge] 🔊 PCM Buffer Samples: ${samples.length} items (${count} stereo pairs) | Peak Int16: ${maxVal}`);
+                }
+
+                return samples;
+            }
+        } else {
+            if (!this._loggedMissingFunc) {
+                this._loggedMissingFunc = true;
+                console.error('[MGBABridge] _mgba_get_audio_buffer function is NOT defined in module!', this.module);
             }
         }
         return null;

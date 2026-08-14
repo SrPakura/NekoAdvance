@@ -374,8 +374,18 @@ export class AudioDriver {
       if (this.ctx) this.stats.contextState = this.ctx.state;
     }
 
+    const count = samples.length >> 1;
+    const isInt16 = samples instanceof Int16Array;
+    const norm = isInt16 ? (1.0 / 32768.0) : 1.0;
+
+    let peak = 0;
+    for (let i = 0; i < samples.length; i++) {
+      const val = Math.abs(samples[i]) * norm;
+      if (val > peak) peak = val;
+    }
+    this.stats.peakVolume = peak;
+
     if (this.isWorkletActive && this.workletNode) {
-      const isInt16 = samples instanceof Int16Array;
       this.workletNode.port.postMessage({
         type: 'samples',
         samples: samples,
