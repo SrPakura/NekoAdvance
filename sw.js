@@ -1,6 +1,6 @@
 // NekoAdvance Rolling-Release Service Worker
 // Automatically checks for updates, auto-activates in the background, and serves freshest content.
-const CACHE_NAME = 'nekoadvance-rolling-v32';
+const CACHE_NAME = 'nekoadvance-rolling-v33';
 
 const ASSETS_TO_CACHE = [
   './',
@@ -88,7 +88,7 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(event.request.url);
   const isHtml = event.request.mode === 'navigate' || event.request.headers.get('accept')?.includes('text/html');
-  const isCode = url.pathname.endsWith('.js') || url.pathname.endsWith('.css') || url.pathname.endsWith('.json');
+  const isCode = url.pathname.endsWith('.js') || url.pathname.endsWith('.css') || url.pathname.endsWith('.json') || url.pathname.endsWith('.wasm');
 
   if (isHtml || isCode) {
     event.respondWith(

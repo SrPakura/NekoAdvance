@@ -57,8 +57,12 @@ export class MGBABridge {
             }
 
             if (typeof mGBAFactory === 'function') {
+                const wasmBinaryUrl = new URL('./mgba.wasm', import.meta.url).href;
                 this.module = await mGBAFactory({
-                    locateFile: (file) => './js/core/mgba/' + file
+                    locateFile: (file) => {
+                        if (file.endsWith('.wasm')) return wasmBinaryUrl;
+                        return file;
+                    }
                 });
 
                 if (this.module && typeof this.module._mgba_init === 'function') {
