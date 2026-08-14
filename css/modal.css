@@ -1,0 +1,322 @@
+/* ==========================================================================
+   NekoAdvance - In-Screen Retro GBA BIOS / System Menu
+   ========================================================================== */
+
+.retro-screen-menu {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: #0e0a1a;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.retro-screen-menu.open {
+  opacity: 1;
+  pointer-events: all;
+}
+
+/* CRT Scanlines Overlay inside the screen */
+.retro-screen-scanlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    rgba(18, 16, 26, 0) 50%, 
+    rgba(0, 0, 0, 0.4) 50%
+  );
+  background-size: 100% 4px;
+  z-index: 10;
+  opacity: 0.7;
+}
+
+/* --- Header & Tabs Navigation --- */
+.retro-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #191228;
+  border-bottom: 2px solid #3d2f5a;
+  padding: 4px 6px;
+  flex-shrink: 0;
+  z-index: 5;
+}
+
+.retro-tab-trigger {
+  font-family: var(--font-retro), monospace;
+  font-size: 0.55rem;
+  color: #a78bfa;
+  background: #2b1f44;
+  padding: 2px 4px;
+  border-radius: 2px;
+  border: 1px solid #4e3a75;
+}
+
+.retro-tabs {
+  display: flex;
+  gap: 3px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.retro-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.retro-tab {
+  font-family: var(--font-retro), monospace;
+  font-size: 0.55rem;
+  color: #94a3b8;
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 3px 6px;
+  border-radius: 2px;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  transition: all 0.08s ease;
+}
+
+.retro-tab:hover {
+  color: #ffffff;
+  background: #2b1f44;
+}
+
+.retro-tab.active {
+  color: #00f0ff;
+  background: #2b1f44;
+  border: 1px solid #00f0ff;
+  box-shadow: 0 0 6px rgba(0, 240, 255, 0.35);
+}
+
+/* --- Menu Body & Panels --- */
+.retro-menu-body {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 6px 8px;
+  position: relative;
+  z-index: 5;
+  scrollbar-width: thin;
+  scrollbar-color: #554483 #120e20;
+}
+
+.retro-menu-body::-webkit-scrollbar {
+  width: 4px;
+}
+.retro-menu-body::-webkit-scrollbar-track {
+  background: #120e20;
+}
+.retro-menu-body::-webkit-scrollbar-thumb {
+  background: #554483;
+  border-radius: 2px;
+}
+
+.retro-tab-panel {
+  display: none;
+  height: 100%;
+}
+
+.retro-tab-panel.active {
+  display: block;
+}
+
+/* --- Retro Item List & Navigation --- */
+.retro-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.retro-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  background: rgba(33, 25, 52, 0.6);
+  border: 1px solid #2e2348;
+  border-radius: 3px;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.7rem;
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: background 0.05s ease, border-color 0.05s ease;
+}
+
+.retro-row:hover {
+  background: rgba(45, 34, 70, 0.85);
+  border-color: #554483;
+}
+
+.retro-row.selected {
+  background: #2a1e45 !important;
+  border-color: #38bdf8 !important;
+  color: #ffffff !important;
+  box-shadow: inset 0 0 8px rgba(56, 189, 248, 0.2);
+}
+
+.retro-row-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.retro-cursor {
+  font-family: var(--font-retro), monospace;
+  font-size: 0.6rem;
+  color: #00f0ff;
+  visibility: hidden;
+  width: 10px;
+}
+
+.retro-row.selected .retro-cursor {
+  visibility: visible;
+  animation: retroBlink 0.8s infinite;
+}
+
+@keyframes retroBlink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0.2; }
+}
+
+.retro-row-title {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.retro-row-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.retro-badge {
+  font-family: var(--font-retro), monospace;
+  font-size: 0.5rem;
+  padding: 2px 4px;
+  border-radius: 2px;
+  background: #191228;
+  border: 1px solid #3d2f5a;
+  color: #94a3b8;
+}
+
+.retro-badge.badge-on {
+  color: #34d399;
+  border-color: #34d399;
+  background: rgba(52, 211, 153, 0.15);
+}
+
+.retro-badge.badge-off {
+  color: #f87171;
+  border-color: #f87171;
+  background: rgba(248, 113, 113, 0.15);
+}
+
+.retro-badge.badge-active {
+  color: #fbbf24;
+  border-color: #fbbf24;
+  background: rgba(251, 191, 36, 0.15);
+}
+
+.retro-val-adjust {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-retro), monospace;
+  font-size: 0.55rem;
+  color: #a78bfa;
+}
+
+/* Action sub-buttons on rows (e.g. Delete, Save, Sav export) */
+.retro-btn-sub {
+  background: #1e1630;
+  border: 1px solid #4a3a69;
+  color: #e2e8f0;
+  font-family: var(--font-retro), monospace;
+  font-size: 0.48rem;
+  padding: 3px 6px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.retro-btn-sub:hover {
+  background: #392b57;
+  border-color: #a78bfa;
+}
+
+/* Cheat input inside retro menu */
+.retro-cheat-box {
+  background: rgba(20, 15, 32, 0.9);
+  border: 1px solid #4a3a69;
+  padding: 6px;
+  border-radius: 3px;
+  margin-bottom: 6px;
+}
+
+.retro-input {
+  width: 100%;
+  background: #130d22;
+  border: 1px solid #3d2f5a;
+  color: #f8fafc;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.65rem;
+  padding: 4px 6px;
+  border-radius: 2px;
+  margin-bottom: 4px;
+  box-sizing: border-box;
+}
+.retro-input:focus {
+  outline: none;
+  border-color: #00f0ff;
+}
+
+/* Empty placeholder in lists */
+.retro-empty-hint {
+  text-align: center;
+  padding: 1rem 0.5rem;
+  color: #94a3b8;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.65rem;
+  line-height: 1.4;
+}
+
+/* --- Retro Bottom Footer Guide --- */
+.retro-menu-footer {
+  background: #191228;
+  border-top: 2px solid #3d2f5a;
+  padding: 3px 6px;
+  flex-shrink: 0;
+  z-index: 5;
+}
+
+.retro-footer-guide {
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  font-family: var(--font-retro), monospace;
+  font-size: 0.48rem;
+  color: #94a3b8;
+  letter-spacing: 0.5px;
+}
+
+.retro-key {
+  color: #00f0ff;
+  background: #2b1f44;
+  padding: 1px 3px;
+  border-radius: 2px;
+  border: 1px solid #4e3a75;
+  margin-right: 2px;
+}

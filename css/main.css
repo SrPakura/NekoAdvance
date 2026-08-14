@@ -1,0 +1,146 @@
+/* ==========================================================================
+   NekoAdvance - Main Stylesheet & Global Design System
+   ========================================================================== */
+
+:root {
+  /* Color Palette */
+  --bg-primary: #51407e;
+  --bg-darker: #2f2549;
+  --bg-surface: #241d38;
+  --bg-card: rgba(47, 37, 73, 0.85);
+  --bg-card-hover: rgba(65, 52, 100, 0.9);
+  
+  --accent-purple: #8b5cf6;
+  --accent-light: #a78bfa;
+  --accent-glow: rgba(167, 139, 250, 0.4);
+  --accent-cyan: #38bdf8;
+  --accent-pink: #ec4899;
+  --accent-green: #34d399;
+  --accent-gold: #fbbf24;
+  --accent-danger: #f87171;
+
+  --cat-body: #1c1a20;
+  --cat-body-border: #353040;
+  --cat-accent: #51407e;
+  
+  --btn-dark: #2a2536;
+  --btn-border: #4d4461;
+  --btn-active: #1a1622;
+  
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --text-dim: #64748b;
+
+  /* Typography */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  --font-retro: 'Press Start 2P', cursive, monospace;
+
+  /* Transitions & Shadows */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 0 20px var(--accent-glow);
+}
+
+/* Base Reset */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  background-color: #51407e;
+  background: #51407e;
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  touch-action: none;
+}
+
+/* App Root Container */
+#app {
+  width: 100vw;
+  height: 100%;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Drag and drop overlay */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(30, 24, 48, 0.92);
+  backdrop-filter: blur(12px);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 1.5rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s var(--ease-smooth);
+  border: 4px dashed var(--accent-light);
+  border-radius: 24px;
+  margin: 20px;
+}
+
+.drop-overlay.active {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.drop-overlay .icon {
+  width: 80px;
+  height: 80px;
+  color: var(--accent-light);
+  animation: bounce 1.5s infinite;
+}
+
+.drop-overlay h2 {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.drop-overlay p {
+  color: var(--text-muted);
+  font-size: 1.1rem;
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--accent-purple);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-light);
+}

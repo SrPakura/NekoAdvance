@@ -1,0 +1,100 @@
+/* ==========================================================================
+   NekoAdvance - HUD, Status Indicators & Toast Notifications
+   ========================================================================== */
+
+/* Toast Notification Container */
+.toast-container {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 10000;
+  pointer-events: none;
+}
+
+.toast {
+  background: rgba(30, 24, 46, 0.95);
+  border: 1px solid var(--accent-purple);
+  color: var(--text-main);
+  padding: 10px 18px;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6), 0 0 15px var(--accent-glow);
+  font-size: 0.9rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transform: translateX(120%);
+  opacity: 0;
+  transition: transform 0.3s var(--ease-spring), opacity 0.3s ease;
+  pointer-events: all;
+}
+
+.toast.show {
+  transform: translateX(0);
+  opacity: 1;
+}
+
+.toast-icon {
+  font-size: 1.1rem;
+}
+
+/* Speed Badge (Over screen when fast-forward is active) */
+.speed-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: rgba(236, 72, 153, 0.85);
+  color: white;
+  font-family: var(--font-retro);
+  font-size: 0.65rem;
+  padding: 4px 8px;
+  border-radius: 6px;
+  box-shadow: 0 0 10px rgba(236, 72, 153, 0.6);
+  z-index: 6;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: all 0.2s var(--ease-spring);
+  pointer-events: none;
+}
+
+.speed-badge.visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Power LED Status Indicator */
+.hud-bar {
+  position: absolute;
+  top: 15px;
+  left: 25px;
+  display: flex;
+  align-items: center;
+  z-index: 100;
+  background: rgba(28, 22, 42, 0.6);
+  backdrop-filter: blur(6px);
+  padding: 6px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.power-led {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 8px #34d399;
+  transition: background 0.3s ease;
+}
+
+.power-led.busy {
+  background: #fbbf24;
+  box-shadow: 0 0 8px #fbbf24;
+}
+
+.power-led.off {
+  background: #64748b;
+  box-shadow: none;
+}
