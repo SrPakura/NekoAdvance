@@ -240,19 +240,64 @@ export class MGBABridge {
     }
 
     /**
-     * Add cheat code (GameShark, Action Replay, CodeBreaker)
-     * @param {string} code 
-     * @param {string} type 
+     * Clear all active cheats in the mGBA core
      */
-    addCheat(code, type = 'gameshark') {
-        if (this.module && typeof this.module._mgba_add_cheat === 'function') {
-            const codePtr = this.module.allocateUTF8(code);
-            const typePtr = this.module.allocateUTF8(type);
-            this.module._mgba_add_cheat(codePtr, typePtr);
-            this.module._free(codePtr);
-            this.module._free(typePtr);
+    clearCheats() {
+        if (this.module && typeof this.module._mgba_clear_cheats === 'function') {
+            this.module._mgba_clear_cheats();
             return true;
         }
         return false;
+    }
+
+    /**
+     * Toggle cheat enabled state by index
+     * @param {number} index 
+     * @param {boolean} enabled 
+     */
+    toggleCheat(index, enabled) {
+        if (this.module && typeof this.module._mgba_toggle_cheat === 'function') {
+            this.module._mgba_toggle_cheat(index, enabled ? 1 : 0);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Add cheat code set (GameShark, Action Replay, CodeBreaker, Raw)
+     * @param {string} name 
+     * @param {string} code 
+     * @param {string} type 
+     * @param {boolean} enabled 
+     */
+    addCheat(name, code, type = 'auto', enabled = true) {
+        if (this.module && typeof this.module._mgba_add_cheat === 'function') {
+            const namePtr = this.module.allocateUTF8(name || 'Cheat');
+            const codePtr = this.module.allocateUTF8(code || '');
+            const typePtr = this.module.allocateUTF8(type || 'auto');
+            const success = this.module._mgba_add_cheat(namePtr, codePtr, typePtr, enabled ? 1 : 0);
+            this.module._free(namePtr);
+            this.module._free(codePtr);
+            this.module._free(typePtr);
+            return !!success;
+        }
+        return false;
+    }
+
+    /**
+     * Synchronize a list of cheat objects with the mGBA core
+     * @param {Array} cheatsList 
+     */
+    syncCheats(cheatsList = []) {
+        this.clearCheats();
+        if (!Array.isArray(cheatsList)) return;
+
+        for (const cheat of cheatsList) {
+            if (cheat && cheat.code) {
+                const enabled = cheat.enabled !== false;
+                const format = cheat.format || 'auto';
+                this.addCheat(cheat.name || 'Cheat', cheat.code, format, enabled);
+            }
+        }
     }
 }

@@ -559,6 +559,7 @@ export class MenuModal {
         const id = parseInt(b.dataset.id, 10);
         await storage.deleteCheat(id);
         this.engine.cheatEngine.removeCheat(id);
+        await this.engine.syncCheats();
         this.renderCheats();
       });
     });
@@ -675,6 +676,7 @@ export class MenuModal {
           found.enabled = enabled;
           await storage.saveCheat(found);
         }
+        await this.engine.syncCheats(all);
         this.renderCheats();
       }
     } else if (activeTab === 'settings') {
@@ -847,6 +849,7 @@ export class MenuModal {
 
     await storage.saveCheat(cheat);
     this.engine.cheatEngine.addCheat(cheat);
+    await this.engine.syncCheats();
     this.hud.showToast('Truco añadido y activado', '⚡');
     this.renderCheats();
   }

@@ -155,6 +155,7 @@ export class GBAEngine {
     // Load Cheats for this ROM
     const savedCheats = await storage.getCheats(this.romId);
     this.cheatEngine.setCheats(savedCheats);
+    this.syncCheats(savedCheats);
 
     // Ensure Audio Context is unlocked
     this.audioDriver.ensureContext();
@@ -429,6 +430,15 @@ export class GBAEngine {
     } catch (e) {
       console.error('[GBAEngine] Error importing save state:', e);
       return false;
+    }
+  }
+
+  async syncCheats(cheatsList = null) {
+    if (!this.romId) return;
+    const cheats = cheatsList || await storage.getCheats(this.romId);
+    this.cheatEngine.setCheats(cheats);
+    if (this.useMgba && this.mgbaBridge) {
+      this.mgbaBridge.syncCheats(cheats);
     }
   }
 }
