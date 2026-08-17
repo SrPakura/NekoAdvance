@@ -9,13 +9,13 @@
   max-height: 100dvh;
   display: flex;
   flex-direction: row;
-  justify-content: space-between;
+  justify-content: center;
   align-items: center;
-  padding: 0.25rem 0.5rem;
+  padding: 0.25rem clamp(0.5rem, 2vw, 2rem);
   box-sizing: border-box;
   position: relative;
   overflow: hidden;
-  gap: 0.25rem;
+  gap: clamp(0.5rem, 2.5vw, 2.5rem);
 }
 
 /* 2. Center Area: Neko Handheld Console (Pillando todo el alto posible en horizontal) */
@@ -308,8 +308,9 @@
 .control-frame {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: center;
   align-items: center;
+  gap: clamp(1.2rem, 3.2vh, 2.2rem);
   background: transparent;
   border: none;
   box-shadow: none;
@@ -325,14 +326,28 @@
   max-height: 100%;
 }
 
-/* 1. Left Frame (Order 1 in horizontal): D-Pad on top, Select on bottom */
+/* 1. Left Frame (Order 1 in horizontal): D-Pad on top, Select on bottom (closer to center console) */
 .left-frame {
   order: 1;
+  align-items: flex-end;
+  padding-right: clamp(0.25rem, 1.5vw, 1.5rem);
 }
 
-/* 3. Right Frame (Order 3 in horizontal): A/B on top, Start on bottom */
+.left-frame .system-btn-slot {
+  width: clamp(160px, 22vw, 210px);
+  justify-content: center;
+}
+
+/* 3. Right Frame (Order 3 in horizontal): A/B on top, Start on bottom (closer to center console) */
 .right-frame {
   order: 3;
+  align-items: flex-start;
+  padding-left: clamp(0.25rem, 1.5vw, 1.5rem);
+}
+
+.right-frame .system-btn-slot {
+  width: clamp(170px, 24vw, 230px);
+  justify-content: center;
 }
 
 /* D-Pad Container (Cruceta) */
@@ -344,7 +359,7 @@
   justify-content: center;
   align-items: center;
   flex-shrink: 0;
-  margin: auto 0;
+  margin: 0;
 }
 
 .dpad-btn {
@@ -434,7 +449,7 @@
   width: clamp(170px, 24vw, 230px);
   height: clamp(140px, 19vw, 180px);
   flex-shrink: 0;
-  margin: auto 0;
+  margin: 0;
 }
 
 .action-btn {
@@ -495,8 +510,8 @@
   justify-content: center;
   align-items: center;
   width: 100%;
-  margin-top: auto;
-  padding-bottom: 0.5rem;
+  margin: 0;
+  padding: 0;
 }
 
 .capsule-btn {
@@ -573,15 +588,28 @@
     background: transparent;
     border: none;
     box-shadow: none;
-    justify-content: space-evenly;
+    justify-content: center;
+    gap: clamp(1rem, 2.5vh, 1.8rem);
   }
 
   .left-frame {
     grid-area: left;
+    align-items: center;
+    padding-right: 0;
+  }
+
+  .left-frame .system-btn-slot {
+    width: 100%;
   }
 
   .right-frame {
     grid-area: right;
+    align-items: center;
+    padding-left: 0;
+  }
+
+  .right-frame .system-btn-slot {
+    width: 100%;
   }
 
   .dpad-container {
@@ -613,7 +641,8 @@
   }
 
   .system-btn-slot {
-    padding-bottom: 0.25rem;
+    padding: 0;
+    margin: 0;
   }
 
   .capsule-btn {
@@ -625,8 +654,9 @@
 /* Small Landscape Screens (Mobile landscape with short vertical height) */
 @media (orientation: landscape) and (max-height: 520px) {
   .console-wrapper {
-    padding: 0.2rem 0.35rem;
-    gap: 0.25rem;
+    padding: 0.2rem clamp(0.35rem, 1.5vw, 1.5rem);
+    gap: clamp(0.25rem, 1.5vw, 1.5rem);
+    justify-content: center;
   }
 
   .control-frame {
@@ -639,11 +669,22 @@
     border: none;
     box-shadow: none;
     max-height: 100%;
+    justify-content: center;
+    gap: clamp(0.8rem, 2.4vh, 1.5rem);
+  }
+
+  .left-frame {
+    padding-right: clamp(0.2rem, 1.2vw, 1rem);
+  }
+
+  .right-frame {
+    padding-left: clamp(0.2rem, 1.2vw, 1rem);
   }
 
   .dpad-container {
     width: clamp(135px, 20vw, 175px);
     height: clamp(135px, 20vw, 175px);
+    margin: 0;
   }
 
   .dpad-btn {
@@ -659,6 +700,7 @@
   .action-buttons {
     width: clamp(145px, 22vw, 190px);
     height: clamp(115px, 17vw, 150px);
+    margin: 0;
   }
 
   .action-btn {
@@ -668,7 +710,8 @@
   }
 
   .system-btn-slot {
-    padding-bottom: 0.25rem;
+    padding: 0;
+    margin: 0;
   }
 
   .capsule-btn {
