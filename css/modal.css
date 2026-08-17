@@ -257,14 +257,7 @@
   border-color: #a78bfa;
 }
 
-/* Cheat input inside retro menu */
-.retro-cheat-box {
-  background: rgba(20, 15, 32, 0.9);
-  border: 1px solid #4a3a69;
-  padding: 6px;
-  border-radius: 3px;
-  margin-bottom: 6px;
-}
+
 
 .retro-input {
   width: 100%;

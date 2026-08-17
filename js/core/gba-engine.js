@@ -10,7 +10,6 @@
  */
 
 import { storage } from './storage.js';
-import { CheatEngine } from './cheat-engine.js';
 import { WebGLRenderer } from './renderer/webgl-renderer.js';
 import { AudioDriver } from './audio/audio-driver.js';
 import { MGBABridge, GBA_KEYS } from './mgba/mgba-bridge.js';
@@ -29,8 +28,9 @@ export const GBA_BUTTONS = {
 };
 
 export class GBAEngine {
-  constructor(canvas) {
+  constructor(canvas, hud = null) {
     this.canvas = canvas;
+    this.hud = hud;
     
     // Hardware WebGL2 Renderer with Retro Shaders
     this.renderer = new WebGLRenderer(canvas);
@@ -40,7 +40,6 @@ export class GBAEngine {
 
     // Core Bridges
     this.mgbaBridge = new MGBABridge();
-    this.cheatEngine = new CheatEngine();
     this.gba = null; // Fallback instance if needed
 
     this.rom = null;
@@ -56,6 +55,7 @@ export class GBAEngine {
     this.currentFPS = 0;
     this.frameCount = 0;
     this.lastFpsTime = performance.now();
+    this.lastSaveToastTime = 0;
     this.animFrameId = null;
 
     // Framebuffer storage (240x160 RGBA = 153,600 bytes)
@@ -63,6 +63,10 @@ export class GBAEngine {
 
     this.initSettings();
     this.initCore();
+  }
+
+  setHUD(hud) {
+    this.hud = hud;
   }
 
   async initSettings() {
@@ -152,11 +156,6 @@ export class GBAEngine {
       }
     }
 
-    // Load Cheats for this ROM
-    const savedCheats = await storage.getCheats(this.romId);
-    this.cheatEngine.setCheats(savedCheats);
-    this.syncCheats(savedCheats);
-
     // Ensure Audio Context is unlocked
     this.audioDriver.ensureContext();
 
@@ -230,19 +229,27 @@ export class GBAEngine {
           this.renderer.renderFrame(this.pixelBuffer);
         }
 
-        // Check if save data is updated periodically (every 300 frames / ~5 sec)
+        // Instant in-game save detection & persistence
         if (this.useMgba) {
-          if (this.frameCount % 300 === 0) {
-            try {
-              const currentSave = this.mgbaBridge.getSaveData();
-              if (currentSave && currentSave.length > 0) {
-                storage.saveBattery(this.romId, currentSave.buffer);
+          if (this.mgbaBridge.isSaveDirty()) {
+            this.flushSave();
+            if (now - this.lastSaveToastTime > 3000) {
+              this.lastSaveToastTime = now;
+              if (this.hud && typeof this.hud.showToast === 'function') {
+                this.hud.showToast('Partida guardada', '💾');
               }
-            } catch (e) {}
+            }
+          } else if (this.frameCount % 300 === 0 && this.frameCount > 0) {
+            this.flushSave();
           }
         } else if (this.gba && this.gba.mmu && this.gba.mmu.save && this.gba.mmu.save.writePending) {
-          this.gba.mmu.save.writePending = false;
-          storage.saveBattery(this.romId, this.gba.mmu.save.buffer);
+          this.flushSave();
+          if (now - this.lastSaveToastTime > 3000) {
+            this.lastSaveToastTime = now;
+            if (this.hud && typeof this.hud.showToast === 'function') {
+              this.hud.showToast('Partida guardada', '💾');
+            }
+          }
         }
 
         if (accumulatedTime > FRAME_DURATION * 2) {
@@ -269,8 +276,30 @@ export class GBAEngine {
     this.animFrameId = requestAnimationFrame(step);
   }
 
+  async flushSave() {
+    if (!this.romId) return false;
+    try {
+      if (this.useMgba && this.mgbaBridge.isRomLoaded) {
+        const currentSave = this.mgbaBridge.getSaveData();
+        if (currentSave && currentSave.length > 0) {
+          await storage.saveBattery(this.romId, currentSave.buffer);
+          this.mgbaBridge.clearSaveDirty();
+          return true;
+        }
+      } else if (this.gba && this.gba.mmu && this.gba.mmu.save) {
+        this.gba.mmu.save.writePending = false;
+        await storage.saveBattery(this.romId, this.gba.mmu.save.buffer);
+        return true;
+      }
+    } catch (e) {
+      console.warn('[GBAEngine] flushSave error:', e);
+    }
+    return false;
+  }
+
   pause() {
     this.isPaused = true;
+    this.flushSave();
     if (this.gba) this.gba.pause();
   }
 
@@ -286,14 +315,16 @@ export class GBAEngine {
     }
   }
 
-  reset() {
+  async reset() {
     if (this.rom) {
+      await this.flushSave();
       this.stop();
-      this.loadROM(this.rom, this.romName);
+      await this.loadROM(this.rom, this.romName);
     }
   }
 
   stop() {
+    this.flushSave();
     this.isRunning = false;
     this.isPaused = false;
     if (this.animFrameId) {
@@ -430,15 +461,6 @@ export class GBAEngine {
     } catch (e) {
       console.error('[GBAEngine] Error importing save state:', e);
       return false;
-    }
-  }
-
-  async syncCheats(cheatsList = null) {
-    if (!this.romId) return;
-    const cheats = cheatsList || await storage.getCheats(this.romId);
-    this.cheatEngine.setCheats(cheats);
-    if (this.useMgba && this.mgbaBridge) {
-      this.mgbaBridge.syncCheats(cheats);
     }
   }
 }

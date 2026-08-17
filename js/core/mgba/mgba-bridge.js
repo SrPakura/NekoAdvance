@@ -6,7 +6,6 @@
  * - Interleaved PCM Audio Stream Extraction
  * - Cartridge Save Management (.sav synchronizer for Flash 128K, SRAM, EEPROM)
  * - Binary Snapshot Save States (Freeze & Defrost)
- * - Cheat Codes Engine (GameShark, Action Replay, CodeBreaker)
  */
 
 export const GBA_KEYS = {
@@ -193,6 +192,26 @@ export class MGBABridge {
     }
 
     /**
+     * Check if in-game save data was written/dirtied by the game ROM
+     * @returns {boolean}
+     */
+    isSaveDirty() {
+        if (this.module && typeof this.module._mgba_is_save_dirty === 'function') {
+            return !!this.module._mgba_is_save_dirty();
+        }
+        return false;
+    }
+
+    /**
+     * Clear dirty flag after syncing save to storage
+     */
+    clearSaveDirty() {
+        if (this.module && typeof this.module._mgba_clear_save_dirty === 'function') {
+            this.module._mgba_clear_save_dirty();
+        }
+    }
+
+    /**
      * Load battery backed cartridge save (.sav) into memory
      * @param {Uint8Array} saveData 
      */
@@ -237,67 +256,5 @@ export class MGBABridge {
             return !!success;
         }
         return false;
-    }
-
-    /**
-     * Clear all active cheats in the mGBA core
-     */
-    clearCheats() {
-        if (this.module && typeof this.module._mgba_clear_cheats === 'function') {
-            this.module._mgba_clear_cheats();
-            return true;
-        }
-        return false;
-    }
-
-    /**
-     * Toggle cheat enabled state by index
-     * @param {number} index 
-     * @param {boolean} enabled 
-     */
-    toggleCheat(index, enabled) {
-        if (this.module && typeof this.module._mgba_toggle_cheat === 'function') {
-            this.module._mgba_toggle_cheat(index, enabled ? 1 : 0);
-            return true;
-        }
-        return false;
-    }
-
-    /**
-     * Add cheat code set (GameShark, Action Replay, CodeBreaker, Raw)
-     * @param {string} name 
-     * @param {string} code 
-     * @param {string} type 
-     * @param {boolean} enabled 
-     */
-    addCheat(name, code, type = 'auto', enabled = true) {
-        if (this.module && typeof this.module._mgba_add_cheat === 'function') {
-            const namePtr = this.module.allocateUTF8(name || 'Cheat');
-            const codePtr = this.module.allocateUTF8(code || '');
-            const typePtr = this.module.allocateUTF8(type || 'auto');
-            const success = this.module._mgba_add_cheat(namePtr, codePtr, typePtr, enabled ? 1 : 0);
-            this.module._free(namePtr);
-            this.module._free(codePtr);
-            this.module._free(typePtr);
-            return !!success;
-        }
-        return false;
-    }
-
-    /**
-     * Synchronize a list of cheat objects with the mGBA core
-     * @param {Array} cheatsList 
-     */
-    syncCheats(cheatsList = []) {
-        this.clearCheats();
-        if (!Array.isArray(cheatsList)) return;
-
-        for (const cheat of cheatsList) {
-            if (cheat && cheat.code) {
-                const enabled = cheat.enabled !== false;
-                const format = cheat.format || 'auto';
-                this.addCheat(cheat.name || 'Cheat', cheat.code, format, enabled);
-            }
-        }
     }
 }

@@ -20,7 +20,9 @@ class SRAMSavedata extends MemoryView {
 
 class FlashSavedata extends MemoryView {
 	constructor(size) {
-		super(new ArrayBuffer(size), 0);
+		const buf = new ArrayBuffer(size);
+		new Uint8Array(buf).fill(0xff);
+		super(buf, 0);
 
 		this.COMMAND_WIPE = 0x10;
 		this.COMMAND_ERASE_SECTOR = 0x30;
@@ -55,7 +57,7 @@ class FlashSavedata extends MemoryView {
 		if (this.idMode && offset < 2) {
 			return (this.id >> (offset << 3)) & 0xff;
 		} else if (offset < 0x10000) {
-			return this.bank.getInt8(offset);
+			return this.bank.getUint8(offset);
 		} else {
 			return 0;
 		}
@@ -78,6 +80,15 @@ class FlashSavedata extends MemoryView {
 		return (this.loadU8(offset) & 0xff) | (this.loadU8(offset + 1) << 8);
 	}
 	store8(offset, value) {
+		if (value === this.COMMAND_TERMINATE_ID) {
+			this.idMode = false;
+			this.command = 0;
+			this.pendingCommand = 0;
+			this.first = 0;
+			this.second = 0;
+			return;
+		}
+
 		switch (this.command) {
 			case 0:
 				if (offset == 0x5555) {
@@ -115,27 +126,21 @@ class FlashSavedata extends MemoryView {
 			case this.COMMAND_ERASE:
 				switch (value) {
 					case this.COMMAND_WIPE:
-						if (offset == 0x5555) {
-							for (var i = 0; i < this.view.byteLength; i += 4) {
-								this.view.setInt32(i, -1);
-							}
-						}
+						new Uint8Array(this.buffer).fill(0xff);
+						this.writePending = true;
 						break;
 					case this.COMMAND_ERASE_SECTOR:
-						if ((offset & 0x0fff) == 0) {
-							for (var i = offset; i < offset + 0x1000; i += 4) {
-								this.bank.setInt32(i, -1);
-							}
-						}
+						const sector = offset & ~0x0fff;
+						new Uint8Array(this.buffer, this.bank.byteOffset + sector, 0x1000).fill(0xff);
+						this.writePending = true;
 						break;
 				}
 				this.pendingCommand = 0;
 				this.command = 0;
 				break;
 			case this.COMMAND_WRITE:
-				this.bank.setInt8(offset, value);
+				this.bank.setUint8(offset, value);
 				this.command = 0;
-
 				this.writePending = true;
 				break;
 			case this.COMMAND_SWITCH_BANK:
@@ -157,7 +162,7 @@ class FlashSavedata extends MemoryView {
 		throw new Error('Unaligned save to flash!');
 	}
 	replaceData(memory) {
-		var bank = this.view === this.bank1;
+		var isBank1 = this.bank === this.bank1;
 		MemoryView.prototype.replaceData.call(this, memory, 0);
 
 		this.bank0 = new DataView(this.buffer, 0, 0x00010000);
@@ -166,7 +171,12 @@ class FlashSavedata extends MemoryView {
 		} else {
 			this.bank1 = null;
 		}
-		this.bank = bank ? this.bank1 : this.bank0;
+		this.bank = isBank1 && this.bank1 ? this.bank1 : this.bank0;
+		this.idMode = false;
+		this.command = 0;
+		this.pendingCommand = 0;
+		this.first = 0;
+		this.second = 0;
 	}
 }
 

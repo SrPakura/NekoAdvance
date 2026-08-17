@@ -106,7 +106,7 @@ export class MenuModal {
     this.onRomLoad = onRomLoad;
 
     this.menuElement = document.getElementById('retro-menu');
-    this.tabs = ['library', 'states', 'cheats', 'settings'];
+    this.tabs = ['library', 'states', 'settings'];
     this.currentTabIndex = 0;
     this.selectedIndex = 0;
     this.isOpen = false;
@@ -204,6 +204,9 @@ export class MenuModal {
   }
 
   open(tabName = 'library') {
+    if (this.engine) {
+      this.engine.flushSave();
+    }
     const idx = this.tabs.indexOf(tabName);
     this.currentTabIndex = idx >= 0 ? idx : 0;
     this.selectedIndex = 0;
@@ -262,7 +265,6 @@ export class MenuModal {
 
     if (activeTab === 'library') this.renderLibrary();
     else if (activeTab === 'states') this.renderStates();
-    else if (activeTab === 'cheats') this.renderCheats();
     else if (activeTab === 'settings') this.renderSettings();
   }
 
@@ -492,80 +494,7 @@ export class MenuModal {
     });
   }
 
-  // --- TAB 3: TRUCOS (Cheats) ---
-  async renderCheats() {
-    const list = document.getElementById('retro-cheats-list');
-    if (!list) return;
-
-    if (!this.engine.romId) {
-      list.innerHTML = `
-        <div class="retro-empty-hint">
-          INICIA UN JUEGO PARA APLICAR TRUCOS / GAMESHARK.
-        </div>
-      `;
-      this.currentItemsCount = 0;
-      return;
-    }
-
-    const cheats = await storage.getCheats(this.engine.romId);
-    let html = `
-      <div class="retro-row" data-idx="0" data-action="add-cheat">
-        <div class="retro-row-left">
-          <span class="retro-cursor">▶</span>
-          <span class="retro-row-title">⚡ + AÑADIR NUEVO TRUCO</span>
-        </div>
-        <div class="retro-row-right">
-          <span class="retro-badge badge-active">NUEVO</span>
-        </div>
-      </div>
-    `;
-
-    cheats.forEach((c, idx) => {
-      const itemIdx = idx + 1;
-      const badgeClass = c.enabled ? 'badge-on' : 'badge-off';
-      const badgeText = c.enabled ? 'ON' : 'OFF';
-
-      html += `
-        <div class="retro-row" data-idx="${itemIdx}" data-action="toggle-cheat" data-id="${c.id}" data-enabled="${c.enabled}">
-          <div class="retro-row-left">
-            <span class="retro-cursor">▶</span>
-            <span class="retro-row-title">${c.name}</span>
-          </div>
-          <div class="retro-row-right">
-            <span class="retro-badge ${badgeClass}">${badgeText}</span>
-            <button class="retro-btn-sub btn-del-cheat" data-id="${c.id}">✕</button>
-          </div>
-        </div>
-      `;
-    });
-
-    this.currentItemsCount = cheats.length + 1;
-    list.innerHTML = html;
-    this.selectedIndex = Math.min(this.selectedIndex, this.currentItemsCount - 1);
-    this.updateSelectedRow();
-
-    list.querySelectorAll('.retro-row').forEach(row => {
-      row.addEventListener('click', (e) => {
-        if (e.target.closest('.btn-del-cheat')) return;
-        this.selectedIndex = parseInt(row.dataset.idx, 10);
-        this.updateSelectedRow();
-        this.activateSelection();
-      });
-    });
-
-    list.querySelectorAll('.btn-del-cheat').forEach(b => {
-      b.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const id = parseInt(b.dataset.id, 10);
-        await storage.deleteCheat(id);
-        this.engine.cheatEngine.removeCheat(id);
-        await this.engine.syncCheats();
-        this.renderCheats();
-      });
-    });
-  }
-
-  // --- TAB 4: AJUSTES (Settings) ---
+  // --- TAB 3: AJUSTES (Settings) ---
   renderSettings() {
     const list = document.getElementById('retro-settings-list');
     if (!list) return;
@@ -662,23 +591,6 @@ export class MenuModal {
       } else if (action === 'export-state-json') {
         this.exportStateJSON();
       }
-    } else if (activeTab === 'cheats') {
-      const action = activeRow.dataset.action;
-      if (action === 'add-cheat') {
-        this.promptAddCheat();
-      } else if (action === 'toggle-cheat') {
-        const id = parseInt(activeRow.dataset.id, 10);
-        const enabled = activeRow.dataset.enabled !== 'true';
-        this.engine.cheatEngine.toggleCheat(id, enabled);
-        const all = await storage.getCheats(this.engine.romId);
-        const found = all.find(c => c.id === id);
-        if (found) {
-          found.enabled = enabled;
-          await storage.saveCheat(found);
-        }
-        await this.engine.syncCheats(all);
-        this.renderCheats();
-      }
     } else if (activeTab === 'settings') {
       const setting = activeRow.dataset.setting;
       if (setting === 'shader') this.adjustSelection(1);
@@ -690,7 +602,7 @@ export class MenuModal {
       else if (setting === 'haptic') this.adjustSelection(1);
       else if (setting === 'reset') {
         if (this.engine.romId) {
-          this.engine.reset();
+          await this.engine.reset();
           this.hud.showToast('Juego reiniciado', '🔄');
           this.close();
         }
@@ -712,39 +624,30 @@ export class MenuModal {
     this.synth.playCursor();
 
     if (setting === 'shader') {
-      const nextIdx = (this.currentShaderIdx + dir + this.shaderKeys.length) % this.shaderKeys.length;
-      this.currentShaderIdx = nextIdx;
-      const shaderKey = this.shaderKeys[nextIdx];
-      this.engine.setShader(shaderKey);
-      storage.setSetting('shader', shaderKey);
-      this.hud.showToast(`Shader: ${this.shaderLabels[nextIdx]}`, '🎨');
+      this.currentShaderIdx = (this.currentShaderIdx + dir + this.shaderKeys.length) % this.shaderKeys.length;
+      const key = this.shaderKeys[this.currentShaderIdx];
+      this.engine.setShader(key);
+      storage.setSetting('shader', key);
       this.renderSettings();
     } else if (setting === 'color') {
       this.colorCorrection = !this.colorCorrection;
       this.engine.setColorCorrection(this.colorCorrection);
       storage.setSetting('colorCorrection', this.colorCorrection);
-      this.hud.showToast(`Corrección de Color: ${this.colorCorrection ? 'ON' : 'OFF'}`, '🌈');
       this.renderSettings();
     } else if (setting === 'speed') {
-      const currentSpeed = this.engine.speed;
-      const idx = this.speeds.indexOf(currentSpeed);
-      const nextIdx = (idx + dir + this.speeds.length) % this.speeds.length;
-      const newSpeed = this.speeds[nextIdx];
-      this.engine.setSpeed(newSpeed);
-      this.hud.updateSpeedBadge(newSpeed);
+      this.currentSpeedIdx = (this.currentSpeedIdx + dir + this.speeds.length) % this.speeds.length;
+      const speed = this.speeds[this.currentSpeedIdx];
+      this.engine.setSpeed(speed);
       this.renderSettings();
     } else if (setting === 'frameskip') {
-      const nextIdx = (this.currentFrameSkipIdx + dir + this.frameSkipValues.length) % this.frameSkipValues.length;
-      this.currentFrameSkipIdx = nextIdx;
-      const newSkipVal = this.frameSkipValues[nextIdx];
-      this.engine.setFrameSkip(newSkipVal);
-      storage.setSetting('frameskip', newSkipVal);
-      this.hud.showToast(`Frameskip: ${this.frameSkipLabels[nextIdx]}`, '⚡');
+      this.currentFrameSkipIdx = (this.currentFrameSkipIdx + dir + this.frameSkipValues.length) % this.frameSkipValues.length;
+      const val = this.frameSkipValues[this.currentFrameSkipIdx];
+      this.engine.setFrameSkip(val);
       this.renderSettings();
     } else if (setting === 'muteFF') {
-      const newMute = !this.engine.audioDriver.muteOnFastForward;
-      this.engine.audioDriver.muteOnFastForward = newMute;
-      storage.setSetting('muteFF', newMute);
+      const cur = this.engine.audioDriver.muteOnFastForward;
+      this.engine.audioDriver.muteOnFastForward = !cur;
+      storage.setSetting('muteFF', !cur);
       this.renderSettings();
     } else if (setting === 'volume') {
       this.volume = Math.max(0, Math.min(1, Math.round((this.volume + dir * 0.1) * 10) / 10));
@@ -752,9 +655,9 @@ export class MenuModal {
       storage.setSetting('volume', this.volume);
       this.renderSettings();
     } else if (setting === 'haptic') {
-      const newHaptic = !this.inputManager.hapticEnabled;
-      this.inputManager.setHapticEnabled(newHaptic);
-      storage.setSetting('haptic', newHaptic);
+      this.haptic = !this.haptic;
+      this.inputManager.setHapticEnabled(this.haptic);
+      storage.setSetting('haptic', this.haptic);
       this.renderSettings();
     }
   }
@@ -763,18 +666,17 @@ export class MenuModal {
     this.hud.showToast('Teclado: D-Pad=Flechas | A=X | B=Z | L=A | R=S | Start=Enter | Select=Backspace', '⌨️');
   }
 
-  // --- Secondary Action on Button [SELECT] ---
-  async secondaryAction() {
+  // --- Sub Actions / Secondary Buttons ---
+  async handleSubAction(activeRow) {
     const activeTab = this.tabs[this.currentTabIndex];
-    const activeRow = document.querySelector('.retro-tab-panel.active .retro-row.selected');
-    if (!activeRow) return;
-
+    
     if (activeTab === 'states') {
       const slot = parseInt(activeRow.dataset.slot, 10);
-      if (slot) {
-        await this.engine.saveState(slot);
-        this.hud.showToast(`Ranura ${slot} sobreescrita`, '💾');
-        this.synth.playSelect();
+      const hasData = activeRow.dataset.has === 'true';
+      if (hasData) {
+        await storage.deleteState(this.engine.romId, slot);
+        this.hud.showToast(`Estado eliminado (Ranura ${slot})`, '🗑️');
+        this.synth.playCancel();
         this.renderStates();
       }
     } else if (activeTab === 'library') {
@@ -803,6 +705,9 @@ export class MenuModal {
   }
 
   async exportSaveFile(id) {
+    if (this.engine && this.engine.romId === id) {
+      await this.engine.flushSave();
+    }
     const save = await storage.loadBattery(id);
     if (save) {
       const blob = new Blob([save], { type: 'application/octet-stream' });
@@ -832,26 +737,6 @@ export class MenuModal {
     a.click();
     URL.revokeObjectURL(url);
     this.hud.showToast('Estado exportado (.json)', '📥');
-  }
-
-  async promptAddCheat() {
-    const code = prompt('Introduce el código GameShark / ActionReplay / CodeBreaker:\n(Ej: 82003884 0001)');
-    if (!code) return;
-    const name = prompt('Nombre o descripción del truco:\n(Ej: Caramelos Raros)') || 'Truco';
-
-    const cheat = {
-      romId: this.engine.romId,
-      name: name.trim(),
-      code: code.trim(),
-      format: 'Auto',
-      enabled: true
-    };
-
-    await storage.saveCheat(cheat);
-    this.engine.cheatEngine.addCheat(cheat);
-    await this.engine.syncCheats();
-    this.hud.showToast('Truco añadido y activado', '⚡');
-    this.renderCheats();
   }
 
   toggleFullscreen() {

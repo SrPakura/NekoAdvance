@@ -19,6 +19,7 @@ class NekoAdvanceApp {
 
     this.engine = new GBAEngine(this.canvas);
     this.hud = new HUD();
+    this.engine.setHUD(this.hud);
     
     this.inputManager = new InputManager(this.engine, () => this.toggleMenu());
     this.consoleView = new ConsoleView(
@@ -36,6 +37,19 @@ class NekoAdvanceApp {
 
     // Link InputManager with RetroMenu for hardware button navigation
     this.inputManager.setMenuHandler(this.menuModal);
+
+    // Ensure save data is flushed to IndexedDB on page navigation/closing
+    window.addEventListener('beforeunload', () => {
+      if (this.engine) this.engine.flushSave();
+    });
+    window.addEventListener('pagehide', () => {
+      if (this.engine) this.engine.flushSave();
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden' && this.engine) {
+        this.engine.flushSave();
+      }
+    });
 
     this.init();
   }
