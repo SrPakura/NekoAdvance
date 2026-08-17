@@ -154,15 +154,52 @@ export class MenuModal {
       });
     }
 
-    // Load initial settings
+    // Load initial persistent settings
     const savedVol = await storage.getSetting('volume');
-    if (savedVol !== null) this.volume = savedVol;
-    const savedScan = await storage.getSetting('scanlines');
-    if (savedScan !== null) this.scanlines = savedScan;
+    if (savedVol !== null && savedVol !== undefined) {
+      this.volume = savedVol;
+      if (this.engine && this.engine.audioDriver) {
+        this.engine.audioDriver.setVolume(this.volume);
+      }
+    }
+
+    const savedShader = await storage.getSetting('shader');
+    if (savedShader) {
+      const idx = this.shaderKeys.indexOf(savedShader);
+      if (idx >= 0) {
+        this.currentShaderIdx = idx;
+        if (this.engine) this.engine.setShader(savedShader);
+      }
+    }
+
+    const savedColor = await storage.getSetting('colorCorrection');
+    if (savedColor !== null && savedColor !== undefined) {
+      this.colorCorrection = savedColor;
+      if (this.engine) this.engine.setColorCorrection(this.colorCorrection);
+    }
+
     const savedFrameSkip = await storage.getSetting('frameskip');
     if (savedFrameSkip !== null && savedFrameSkip !== undefined) {
       const idx = this.frameSkipValues.indexOf(savedFrameSkip);
-      if (idx >= 0) this.currentFrameSkipIdx = idx;
+      if (idx >= 0) {
+        this.currentFrameSkipIdx = idx;
+        if (this.engine) this.engine.setFrameSkip(savedFrameSkip);
+      }
+    }
+
+    const savedMuteFF = await storage.getSetting('muteFF');
+    if (savedMuteFF !== null && savedMuteFF !== undefined) {
+      if (this.engine && this.engine.audioDriver) {
+        this.engine.audioDriver.muteOnFastForward = savedMuteFF;
+      }
+    }
+
+    const savedHaptic = await storage.getSetting('haptic');
+    if (savedHaptic !== null && savedHaptic !== undefined) {
+      this.haptic = savedHaptic;
+      if (this.inputManager) {
+        this.inputManager.setHapticEnabled(this.haptic);
+      }
     }
   }
 
@@ -550,10 +587,7 @@ export class MenuModal {
       { id: 'frameskip', title: 'SALTO DE FRAMES (FRAMESKIP)', val: `◄ ${currentFrameSkip} ►`, badge: 'FPS' },
       { id: 'muteFF', title: 'SILENCIAR EN AVANCE RÁPIDO', val: `◄ ${muteFF} ►`, badgeClass: muteFFBadge },
       { id: 'volume', title: 'VOLUMEN PRINCIPAL', val: `◄ ${volPercent}% ►`, badge: 'AUDIO' },
-      { id: 'diag', title: 'DIAGNÓSTICO AUDIO & MOTOR', val: '[VER EN VIVO]', badge: 'DEBUG' },
       { id: 'haptic', title: 'VIBRACIÓN HÁPTICA', val: `◄ ${hapticText} ►`, badgeClass: hapticBadge },
-      { id: 'controls', title: 'GUÍA / ATAJOS DE TECLADO', val: '[INFO]', badge: 'KEYS' },
-      { id: 'fullscreen', title: 'PANTALLA COMPLETA', val: '[ENTER]', badge: 'FULL' },
       { id: 'reset', title: 'REINICIAR JUEGO ACTUAL', val: '[RESET]', badgeClass: 'badge-off' },
       { id: 'pwa', title: 'INSTALAR APP (PWA)', val: '[INSTALL]', badgeClass: 'badge-active' }
     ];
@@ -651,10 +685,7 @@ export class MenuModal {
       else if (setting === 'frameskip') this.adjustSelection(1);
       else if (setting === 'muteFF') this.adjustSelection(1);
       else if (setting === 'volume') this.adjustSelection(1);
-      else if (setting === 'diag') this.openDiagnosticsModal();
       else if (setting === 'haptic') this.adjustSelection(1);
-      else if (setting === 'controls') this.showControlsInfo();
-      else if (setting === 'fullscreen') this.toggleFullscreen();
       else if (setting === 'reset') {
         if (this.engine.romId) {
           this.engine.reset();
@@ -683,11 +714,13 @@ export class MenuModal {
       this.currentShaderIdx = nextIdx;
       const shaderKey = this.shaderKeys[nextIdx];
       this.engine.setShader(shaderKey);
+      storage.setSetting('shader', shaderKey);
       this.hud.showToast(`Shader: ${this.shaderLabels[nextIdx]}`, '🎨');
       this.renderSettings();
     } else if (setting === 'color') {
       this.colorCorrection = !this.colorCorrection;
       this.engine.setColorCorrection(this.colorCorrection);
+      storage.setSetting('colorCorrection', this.colorCorrection);
       this.hud.showToast(`Corrección de Color: ${this.colorCorrection ? 'ON' : 'OFF'}`, '🌈');
       this.renderSettings();
     } else if (setting === 'speed') {
@@ -703,11 +736,13 @@ export class MenuModal {
       this.currentFrameSkipIdx = nextIdx;
       const newSkipVal = this.frameSkipValues[nextIdx];
       this.engine.setFrameSkip(newSkipVal);
+      storage.setSetting('frameskip', newSkipVal);
       this.hud.showToast(`Frameskip: ${this.frameSkipLabels[nextIdx]}`, '⚡');
       this.renderSettings();
     } else if (setting === 'muteFF') {
       const newMute = !this.engine.audioDriver.muteOnFastForward;
       this.engine.audioDriver.muteOnFastForward = newMute;
+      storage.setSetting('muteFF', newMute);
       this.renderSettings();
     } else if (setting === 'volume') {
       this.volume = Math.max(0, Math.min(1, Math.round((this.volume + dir * 0.1) * 10) / 10));
@@ -717,9 +752,8 @@ export class MenuModal {
     } else if (setting === 'haptic') {
       const newHaptic = !this.inputManager.hapticEnabled;
       this.inputManager.setHapticEnabled(newHaptic);
+      storage.setSetting('haptic', newHaptic);
       this.renderSettings();
-    } else if (setting === 'controls') {
-      this.showControlsInfo();
     }
   }
 
