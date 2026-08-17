@@ -10,12 +10,13 @@ export class HUD {
     this.powerLed = document.getElementById('power-led');
   }
 
-  showToast(message, icon = '✨', duration = 3000) {
+  showToast(message, icon = '', duration = 3000) {
     if (!this.toastContainer) return;
 
     const toast = document.createElement('div');
     toast.className = 'toast';
-    toast.innerHTML = `<span class="toast-icon">${icon}</span> <span>${message}</span>`;
+    const iconHtml = icon ? `<span class="toast-icon">${icon}</span>` : '';
+    toast.innerHTML = `${iconHtml}<span>${message}</span>`;
     
     this.toastContainer.appendChild(toast);
     

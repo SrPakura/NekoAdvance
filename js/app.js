@@ -9,6 +9,7 @@ import { ConsoleView } from './ui/console-view.js';
 import { MenuModal } from './ui/menu-modal.js';
 import { HUD } from './ui/hud.js';
 import { storage } from './core/storage.js';
+import { APP_VERSION } from './core/version.js';
 
 class NekoAdvanceApp {
   constructor() {
@@ -40,6 +41,13 @@ class NekoAdvanceApp {
   }
 
   async init() {
+    // Check for version update toast (x.x.x -> y.y.y)
+    const storedVersion = localStorage.getItem('neko_app_version');
+    if (storedVersion && storedVersion !== APP_VERSION) {
+      this.hud.showToast(`${storedVersion} -> ${APP_VERSION}`, '', 4500);
+    }
+    localStorage.setItem('neko_app_version', APP_VERSION);
+
     // Setup Drag and Drop
     this.setupDragAndDrop();
 
@@ -67,19 +75,10 @@ class NekoAdvanceApp {
 
     window.addEventListener('appinstalled', () => {
       window.deferredInstallPrompt = null;
-      this.hud.showToast('¡NekoAdvance instalado con éxito!', '🐾');
     });
 
     // Setup Rolling-Release Service Worker (PWA Auto-Update in background)
     this.setupRollingReleaseServiceWorker();
-
-    // Load Last Played Game or Show Library
-    const roms = await storage.getAllROMs();
-    if (roms.length > 0) {
-      roms.sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0));
-      const lastRom = roms[0];
-      this.hud.showToast(`Bienvenido. Último juego: ${lastRom.name}`, '🐾');
-    }
   }
 
   async loadROM(buffer, name) {
@@ -178,7 +177,6 @@ class NekoAdvanceApp {
           newWorker.addEventListener('statechange', () => {
             if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
               console.log('[PWA] New version installed in background');
-              this.hud.showToast('¡Nueva versión actualizada en segundo plano!', '🚀');
             }
           });
         });
