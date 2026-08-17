@@ -5,9 +5,10 @@
 export class HUD {
   constructor() {
     this.toastContainer = document.getElementById('toast-container');
-    this.speedBadge = document.getElementById('speed-badge');
     this.fpsCounter = document.getElementById('fps-counter');
     this.powerLed = document.getElementById('power-led');
+    this.currentSpeed = 1;
+    this.currentFPS = 0;
   }
 
   showToast(message, icon = '', duration = 3000) {
@@ -30,18 +31,16 @@ export class HUD {
   }
 
   updateSpeedBadge(speed) {
-    if (!this.speedBadge) return;
-    if (speed > 1) {
-      this.speedBadge.textContent = `⚡ ${speed}x`;
-      this.speedBadge.classList.add('visible');
-    } else {
-      this.speedBadge.classList.remove('visible');
-    }
+    this.currentSpeed = speed;
+    this.updateFPS(this.currentFPS, speed);
   }
 
-  updateFPS(fps) {
+  updateFPS(fps, speed = this.currentSpeed) {
+    this.currentFPS = fps;
+    this.currentSpeed = speed;
     if (this.fpsCounter) {
-      this.fpsCounter.textContent = `fps: ${fps}`;
+      const speedText = speed > 1 ? ` (x${speed})` : '';
+      this.fpsCounter.textContent = `fps: ${fps}${speedText}`;
     }
   }
 

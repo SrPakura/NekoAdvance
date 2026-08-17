@@ -53,7 +53,7 @@ class NekoAdvanceApp {
 
     // FPS Loop update
     setInterval(() => {
-      this.hud.updateFPS(this.engine.currentFPS);
+      this.hud.updateFPS(this.engine.currentFPS, this.engine.speed);
       this.hud.setPowerLedState(this.engine.isRunning ? 'on' : 'off');
     }, 500);
 

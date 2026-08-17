@@ -40,27 +40,3 @@
 .toast-icon {
   font-size: 1.1rem;
 }
-
-/* Speed Badge (Over screen when fast-forward is active) */
-.speed-badge {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  background: rgba(236, 72, 153, 0.85);
-  color: white;
-  font-family: var(--font-retro);
-  font-size: 0.65rem;
-  padding: 4px 8px;
-  border-radius: 6px;
-  box-shadow: 0 0 10px rgba(236, 72, 153, 0.6);
-  z-index: 6;
-  opacity: 0;
-  transform: scale(0.8);
-  transition: all 0.2s var(--ease-spring);
-  pointer-events: none;
-}
-
-.speed-badge.visible {
-  opacity: 1;
-  transform: scale(1);
-}
